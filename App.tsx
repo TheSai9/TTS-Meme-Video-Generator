@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppState, MemeSegment, BoundingBox } from './types';
 import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiService';
 import { analyzeLocalImage } from './services/localAnalysisService';
@@ -11,6 +11,29 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
   const [useAI, setUseAI] = useState<boolean>(true);
+  
+  // TTS State
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
+
+  useEffect(() => {
+    const loadVoices = () => {
+      const available = window.speechSynthesis.getVoices();
+      setVoices(available);
+      if (available.length > 0 && !selectedVoiceName) {
+        // Try to find a good default
+        const defaultVoice = available.find(v => v.name.includes('Google US English')) || available[0];
+        setSelectedVoiceName(defaultVoice.name);
+      }
+    };
+    
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, [selectedVoiceName]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -131,6 +154,10 @@ const App: React.FC = () => {
     setEditingSegmentId(newSeg.id);
   };
 
+  const getSelectedVoice = () => {
+      return voices.find(v => v.name === selectedVoiceName) || null;
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 flex flex-col items-center">
       <header className="w-full max-w-4xl flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
@@ -169,6 +196,23 @@ const App: React.FC = () => {
                 </button>
             </div>
 
+            {/* Manual Mode Settings (Voice Selection) */}
+            {!useAI && (
+              <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                  <label className="text-xs font-bold text-slate-400 block mb-2">Narrator Voice (Browser TTS)</label>
+                  <select 
+                    value={selectedVoiceName}
+                    onChange={(e) => setSelectedVoiceName(e.target.value)}
+                    className="w-full bg-slate-800 text-slate-200 text-xs p-2 rounded border border-slate-700 focus:border-cyan-500 outline-none"
+                  >
+                    {voices.length === 0 && <option value="">Loading voices...</option>}
+                    {voices.map(v => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
+                    ))}
+                  </select>
+              </div>
+            )}
+
             <div className="w-full h-64 border-2 border-dashed border-slate-700 rounded-2xl flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-900/80 transition-all cursor-pointer relative group">
               <input 
                 type="file" 
@@ -188,7 +232,7 @@ const App: React.FC = () => {
             {!useAI && (
                <div className="text-center text-xs text-slate-500 bg-slate-900 p-2 rounded border border-slate-800">
                    Running in <strong className="text-slate-300">Manual Mode</strong>. 
-                   Using local detection & OCR (Tesseract). No audio.
+                   Using local detection & OCR. Audio provided by browser TTS.
                </div>
             )}
           </div>
@@ -229,6 +273,7 @@ const App: React.FC = () => {
                 height={600}
                 editingSegmentId={editingSegmentId}
                 onUpdateSegment={updateSegmentBox}
+                voice={getSelectedVoice()}
               />
               
               {/* Controls */}
@@ -262,6 +307,12 @@ const App: React.FC = () => {
                   Reset
                 </button>
               </div>
+              
+              {!useAI && (
+                 <p className="text-[10px] text-slate-500 mt-2 italic">
+                     Note: Audio export is not supported in Manual Mode due to browser limitations. Exported video will be silent.
+                 </p>
+              )}
             </div>
 
             {/* Right: Segment List */}
@@ -324,7 +375,7 @@ const App: React.FC = () => {
                       {seg.audioBase64 ? (
                         <span className="text-[10px] bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded">Audio Ready</span>
                       ) : (
-                        <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">Silent</span>
+                        <span className="text-[10px] bg-indigo-900/50 text-indigo-300 px-1.5 py-0.5 rounded">Browser TTS</span>
                       )}
                       <span className="text-[10px] text-slate-500 font-mono">
                          {seg.duration}s

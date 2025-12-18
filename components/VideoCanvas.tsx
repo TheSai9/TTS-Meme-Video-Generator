@@ -10,6 +10,7 @@ interface VideoCanvasProps {
   height?: number;
   editingSegmentId?: string | null;
   onUpdateSegment?: (id: string, box: BoundingBox) => void;
+  voice?: SpeechSynthesisVoice | null;
 }
 
 type DragMode = 'NONE' | 'MOVE' | 'RESIZE_TL' | 'RESIZE_TR' | 'RESIZE_BL' | 'RESIZE_BR';
@@ -22,7 +23,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   width = 600, 
   height = 600,
   editingSegmentId,
-  onUpdateSegment
+  onUpdateSegment,
+  voice
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -324,7 +326,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   };
 
 
-  // --- AUDIO LOGIC (Unchanged mostly) ---
+  // --- AUDIO LOGIC ---
   const decodePCM = (base64: string, ctx: AudioContext): AudioBuffer => {
     const binaryString = window.atob(base64);
     const len = binaryString.length;
@@ -340,6 +342,9 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   };
 
   const playSequence = async (isRecording: boolean) => {
+    // Stop any existing speech just in case
+    window.speechSynthesis.cancel();
+
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
@@ -382,6 +387,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         let audioDuration = 0;
 
         if (seg.audioBase64) {
+            // --- GEMINI AUDIO PLAYBACK ---
             try {
               const buffer = decodePCM(seg.audioBase64, actx);
               audioDuration = buffer.duration;
@@ -395,15 +401,53 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
             } catch (err) {
               console.error("Audio playback error", err);
             }
+        } else {
+            // --- MANUAL MODE BROWSER TTS ---
+            // Note: This audio does NOT go to MediaRecorder destination, so export is silent.
+            if (seg.text && seg.text.trim()) {
+                await new Promise<void>((resolve) => {
+                    if (!isPlayingRef.current) { resolve(); return; }
+                    
+                    const u = new SpeechSynthesisUtterance(seg.text);
+                    if (voice) u.voice = voice;
+                    
+                    // Estimate duration if we need to sync visual reveals strictly or wait
+                    u.onend = () => resolve();
+                    u.onerror = (e) => {
+                         console.warn("TTS Error", e);
+                         resolve();
+                    };
+                    
+                    window.speechSynthesis.speak(u);
+                });
+                // We consumed time by awaiting speech, so set audioDuration to minimal or 0 to avoid double waiting
+                audioDuration = 0; 
+            }
         }
         
         // Wait for max(audio, custom_duration)
-        const waitTime = Math.max(audioDuration, seg.duration || 0) * 1000;
-        await new Promise(r => setTimeout(r, waitTime));
+        // If we just played Browser TTS, audioDuration is 0, so we wait for custom duration if set, or just proceed.
+        // Actually, Browser TTS promise resolved after speech ended. So we only need to wait extra if duration > speech.
+        const waitTime = Math.max(audioDuration, (seg.duration || 0) - audioDuration) * 1000;
         
-        // Small gap
+        // If using browser TTS, we already waited for it to finish.
+        // If we want to support 'minimum duration' even for browser TTS:
+        if (!seg.audioBase64 && seg.duration > 0) {
+             // Browser TTS already took time. If seg.duration is just a fallback, maybe we assume 0 extra wait?
+             // Let's assume duration field is ignored for TTS sync unless it's strictly longer?
+             // Simple approach: Add small buffer
+             await new Promise(r => setTimeout(r, 200));
+        } else {
+             // Gemini audio plays asynchronously, so we wait explicitly
+             if (seg.audioBase64) await new Promise(r => setTimeout(r, waitTime));
+        }
+
+        // Small gap between segments
         await new Promise(r => setTimeout(r, 200));
     }
+
+    // CLEANUP
+    window.speechSynthesis.cancel();
 
     if (isRecording && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         await new Promise(r => setTimeout(r, 1000));
@@ -421,7 +465,10 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   useEffect(() => {
     if (appState === AppState.PLAYING) playSequence(false);
     else if (appState === AppState.RECORDING) playSequence(true);
-    else isPlayingRef.current = false;
+    else {
+        isPlayingRef.current = false;
+        window.speechSynthesis.cancel();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appState]);
 
