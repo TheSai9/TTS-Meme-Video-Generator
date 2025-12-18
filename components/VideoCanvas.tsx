@@ -38,6 +38,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const destinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const silenceOscillatorRef = useRef<OscillatorNode | null>(null);
 
   // Playback state refs
   const currentSegmentIndexRef = useRef<number>(-1);
@@ -344,6 +345,17 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
       const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || "video/webm";
 
       destinationRef.current = actx.createMediaStreamDestination();
+      
+      // CRITICAL: Add a silent oscillator to "prime" the audio track.
+      // This ensures that even if no TTS plays, the track exists and has time data,
+      // preventing "broken" video files in players that expect consistent track data.
+      silenceOscillatorRef.current = actx.createOscillator();
+      const silentGain = actx.createGain();
+      silentGain.gain.value = 0; // Absolute silence
+      silenceOscillatorRef.current.connect(silentGain);
+      silentGain.connect(destinationRef.current);
+      silenceOscillatorRef.current.start();
+
       const canvasStream = canvasRef.current.captureStream(30);
       const combinedStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
@@ -365,7 +377,9 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
             a.click();
             setAppState(AppState.READY);
         };
-        mediaRecorderRef.current.start();
+        // Request data chunks every 100ms. This prevents the "single chunk" issue 
+        // that often leads to corrupt headers or unseekable files.
+        mediaRecorderRef.current.start(100); 
       } catch (e) {
           console.error("MediaRecorder failed to start", e);
           setAppState(AppState.READY);
@@ -386,7 +400,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         let audioDuration = 0;
 
         if (seg.audioBase64) {
-            // CASE 1: Pre-existing Audio Blob (Gemini or Regenerated)
+            // CASE 1: Pre-existing Audio Blob
             try {
               let buffer: AudioBuffer;
               if (seg.audioType === 'mp3') {
@@ -445,19 +459,22 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
             // If we played an audio buffer, wait for it
             await new Promise(r => setTimeout(r, waitTime));
         } else {
-            // If we used Browser TTS, we already awaited the speech. 
-            // Only wait extra if duration > speech (approximated by assuming duration is total time)
-            // But since we can't measure speech time precisely without measuring start/end,
-            // we effectively just waited for speech. If manual duration is very long, wait remainder?
-            // Simplification: if Browser TTS, just pause a bit extra.
-            if (!isRecording) await new Promise(r => setTimeout(r, 500));
-            else await new Promise(r => setTimeout(r, waitTime)); // For recording silence/JIT audio
+            // Fallback wait if JIT fetch failed or using Browser TTS
+            // In manual recording mode, this produces silence (which is fine now that we have the silent oscillator)
+            if (!isRecording) await new Promise(r => setTimeout(r, 500)); 
+            else await new Promise(r => setTimeout(r, waitTime));
         }
         
         await new Promise(r => setTimeout(r, 200));
     }
 
     if (isRecording && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        // Clean up silence
+        if (silenceOscillatorRef.current) {
+            silenceOscillatorRef.current.stop();
+            silenceOscillatorRef.current.disconnect();
+            silenceOscillatorRef.current = null;
+        }
         await new Promise(r => setTimeout(r, 500));
         mediaRecorderRef.current.stop();
     } else {
