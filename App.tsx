@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { AppState, MemeSegment, BoundingBox } from './types';
 import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiService';
-import { analyzeLocalImage } from './services/localAnalysisService';
+import { analyzeLocalImage, fetchFreeTTS } from './services/localAnalysisService';
 import VideoCanvas from './components/VideoCanvas';
 
 const App: React.FC = () => {
@@ -11,29 +11,6 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
   const [useAI, setUseAI] = useState<boolean>(true);
-  
-  // TTS State
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
-
-  useEffect(() => {
-    const loadVoices = () => {
-      const available = window.speechSynthesis.getVoices();
-      setVoices(available);
-      if (available.length > 0 && !selectedVoiceName) {
-        // Try to find a good default
-        const defaultVoice = available.find(v => v.name.includes('Google US English')) || available[0];
-        setSelectedVoiceName(defaultVoice.name);
-      }
-    };
-    
-    loadVoices();
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    
-    return () => {
-      window.speechSynthesis.onvoiceschanged = null;
-    };
-  }, [selectedVoiceName]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -59,7 +36,18 @@ const App: React.FC = () => {
         try {
             // Local analysis: Heuristic detection + Tesseract OCR
             const analyzedSegments = await analyzeLocalImage(rawBase64);
-            setSegments(analyzedSegments);
+            
+            // Generate Audio for Manual Segments (StreamElements API)
+            setAppState(AppState.GENERATING_AUDIO);
+            const segmentsWithAudio = await Promise.all(analyzedSegments.map(async (seg) => {
+                if (seg.text && seg.text.length > 1) {
+                    const audioBase64 = await fetchFreeTTS(seg.text);
+                    return { ...seg, audioBase64, audioType: 'mp3' as const, duration: 2 };
+                }
+                return seg;
+            }));
+            
+            setSegments(segmentsWithAudio);
             setAppState(AppState.READY);
         } catch (e: any) {
             console.error("Local Analysis Failed", e);
@@ -84,8 +72,8 @@ const App: React.FC = () => {
       setAppState(AppState.GENERATING_AUDIO);
       const segmentsWithAudio = await Promise.all(analyzedSegments.map(async (seg) => {
         try {
-          const { audioBase64 } = await generateSpeechForSegment(seg.text);
-          return { ...seg, audioBase64, duration: 2 }; 
+          const { audioBase64, audioType } = await generateSpeechForSegment(seg.text);
+          return { ...seg, audioBase64, audioType, duration: 2 }; 
         } catch (e) {
           console.error(`Failed to generate audio for segment: ${seg.text}`, e);
           return { ...seg, duration: 3 }; 
@@ -135,6 +123,8 @@ const App: React.FC = () => {
   };
 
   const updateSegmentText = (id: string, text: string) => {
+    // If updating text in manual mode, we could potentially re-fetch audio here.
+    // For simplicity, we just update text. Re-generation would require a button or debounce.
     setSegments(prev => prev.map(s => s.id === id ? { ...s, text } : s));
   };
 
@@ -152,10 +142,6 @@ const App: React.FC = () => {
     };
     setSegments([...segments, newSeg]);
     setEditingSegmentId(newSeg.id);
-  };
-
-  const getSelectedVoice = () => {
-      return voices.find(v => v.name === selectedVoiceName) || null;
   };
 
   return (
@@ -196,23 +182,6 @@ const App: React.FC = () => {
                 </button>
             </div>
 
-            {/* Manual Mode Settings (Voice Selection) */}
-            {!useAI && (
-              <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                  <label className="text-xs font-bold text-slate-400 block mb-2">Narrator Voice (Browser TTS)</label>
-                  <select 
-                    value={selectedVoiceName}
-                    onChange={(e) => setSelectedVoiceName(e.target.value)}
-                    className="w-full bg-slate-800 text-slate-200 text-xs p-2 rounded border border-slate-700 focus:border-cyan-500 outline-none"
-                  >
-                    {voices.length === 0 && <option value="">Loading voices...</option>}
-                    {voices.map(v => (
-                      <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
-                    ))}
-                  </select>
-              </div>
-            )}
-
             <div className="w-full h-64 border-2 border-dashed border-slate-700 rounded-2xl flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-900/80 transition-all cursor-pointer relative group">
               <input 
                 type="file" 
@@ -232,7 +201,7 @@ const App: React.FC = () => {
             {!useAI && (
                <div className="text-center text-xs text-slate-500 bg-slate-900 p-2 rounded border border-slate-800">
                    Running in <strong className="text-slate-300">Manual Mode</strong>. 
-                   Using local detection & OCR. Audio provided by browser TTS.
+                   Using local detection & OCR. Audio provided by Free TTS (StreamElements).
                </div>
             )}
           </div>
@@ -253,7 +222,7 @@ const App: React.FC = () => {
             <p className="text-slate-400 mt-2 text-sm text-center max-w-xs">
               {appState === AppState.ANALYZING 
                 ? (useAI ? 'Detecting text panels and comedic timing.' : 'Running Tesseract.js locally.') 
-                : 'Synthesizing voiceovers using Gemini TTS.'}
+                : 'Fetching audio...'}
             </p>
           </div>
         )}
@@ -273,7 +242,6 @@ const App: React.FC = () => {
                 height={600}
                 editingSegmentId={editingSegmentId}
                 onUpdateSegment={updateSegmentBox}
-                voice={getSelectedVoice()}
               />
               
               {/* Controls */}
@@ -307,12 +275,6 @@ const App: React.FC = () => {
                   Reset
                 </button>
               </div>
-              
-              {!useAI && (
-                 <p className="text-[10px] text-slate-500 mt-2 italic">
-                     Note: Audio export is not supported in Manual Mode due to browser limitations. Exported video will be silent.
-                 </p>
-              )}
             </div>
 
             {/* Right: Segment List */}
@@ -373,9 +335,11 @@ const App: React.FC = () => {
                     {/* Status Badges */}
                     <div className="flex gap-2 mb-2 items-center">
                       {seg.audioBase64 ? (
-                        <span className="text-[10px] bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded">Audio Ready</span>
+                        <span className="text-[10px] bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded">
+                           {seg.audioType === 'mp3' ? 'MP3 Ready' : 'Audio Ready'}
+                        </span>
                       ) : (
-                        <span className="text-[10px] bg-indigo-900/50 text-indigo-300 px-1.5 py-0.5 rounded">Browser TTS</span>
+                        <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">Silent</span>
                       )}
                       <span className="text-[10px] text-slate-500 font-mono">
                          {seg.duration}s

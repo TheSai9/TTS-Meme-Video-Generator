@@ -23,8 +23,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   width = 600, 
   height = 600,
   editingSegmentId,
-  onUpdateSegment,
-  voice
+  onUpdateSegment
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -61,7 +60,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     drawFrame();
   }, [editingSegmentId, segments]);
 
-  // Helper: Get layout metrics for the image on canvas
   const getLayout = () => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
@@ -76,7 +74,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     return { x, y, w, h, scale, imgWidth: img.width, imgHeight: img.height };
   };
 
-  // Main Draw Loop
   const drawFrame = () => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
@@ -94,10 +91,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
     // --- EDIT MODE RENDERING ---
     if (editingSegmentId) {
-      // Draw full image
       ctx.drawImage(img, x, y, w, h);
-      
-      // Overlay
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(x, y, w, h);
 
@@ -113,7 +107,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         const dw = sw * scale;
         const dh = sh * scale;
 
-        // Clear Cutout
         ctx.save();
         ctx.beginPath();
         ctx.rect(dx, dy, dw, dh);
@@ -121,19 +114,15 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         ctx.drawImage(img, x, y, w, h);
         ctx.restore();
 
-        // Border
         ctx.strokeStyle = '#06b6d4';
         ctx.lineWidth = 2;
         ctx.setLineDash([4, 4]);
         ctx.strokeRect(dx, dy, dw, dh);
         ctx.setLineDash([]);
         
-        // Handles
         ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#06b6d4';
-        const hs = 8; // Handle size
+        const hs = 8;
         
-        // TL, TR, BL, BR
         const handles = [
             { x: dx, y: dy },
             { x: dx + dw, y: dy },
@@ -178,7 +167,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         ctx.drawImage(img, x, y, w, h);
         ctx.restore();
 
-        if (index === currentIndex) {
+        // ONLY draw highlight if NOT recording
+        if (index === currentIndex && appState !== AppState.RECORDING) {
           ctx.strokeStyle = '#facc15';
           ctx.lineWidth = 4;
           ctx.shadowColor = '#facc15';
@@ -194,8 +184,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     }
   };
 
-  // --- MOUSE INTERACTION HANDLERS ---
-
   const getCanvasCoords = (e: MouseEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -210,7 +198,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
   const handleMouseDown = (e: MouseEvent) => {
     if (!editingSegmentId || !onUpdateSegment) return;
-    
     const { x: mx, y: my } = getCanvasCoords(e);
     const layout = getLayout();
     if (!layout) return;
@@ -218,25 +205,21 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     const seg = segments.find(s => s.id === editingSegmentId);
     if (!seg) return;
 
-    // Calculate handle positions in canvas coords
     const sx = (seg.box.xmin / 1000) * layout.imgWidth;
     const sy = (seg.box.ymin / 1000) * layout.imgHeight;
     const sw = ((seg.box.xmax - seg.box.xmin) / 1000) * layout.imgWidth;
     const sh = ((seg.box.ymax - seg.box.ymin) / 1000) * layout.imgHeight;
-
     const dx = layout.x + sx * layout.scale;
     const dy = layout.y + sy * layout.scale;
     const dw = sw * layout.scale;
     const dh = sh * layout.scale;
     
-    const hitDist = 15; // Hit area for handles
+    const hitDist = 15;
 
-    // Check Handles
     if (Math.abs(mx - dx) < hitDist && Math.abs(my - dy) < hitDist) setDragMode('RESIZE_TL');
     else if (Math.abs(mx - (dx + dw)) < hitDist && Math.abs(my - dy) < hitDist) setDragMode('RESIZE_TR');
     else if (Math.abs(mx - dx) < hitDist && Math.abs(my - (dy + dh)) < hitDist) setDragMode('RESIZE_BL');
     else if (Math.abs(mx - (dx + dw)) < hitDist && Math.abs(my - (dy + dh)) < hitDist) setDragMode('RESIZE_BR');
-    // Check Inside
     else if (mx > dx && mx < dx + dw && my > dy && my < dy + dh) setDragMode('MOVE');
     else return;
 
@@ -245,14 +228,12 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   };
 
   const handleMouseMove = (e: MouseEvent) => {
-    // 1. Cursor Styling Logic (Even if not dragging)
     if (editingSegmentId && !dragStart) {
         const { x: mx, y: my } = getCanvasCoords(e);
         const layout = getLayout();
         if (layout && canvasRef.current) {
             const seg = segments.find(s => s.id === editingSegmentId);
             if (seg) {
-                // ... Re-calculate positions (copy-paste logic for brevity, ideally shared)
                 const sx = (seg.box.xmin / 1000) * layout.imgWidth;
                 const sy = (seg.box.ymin / 1000) * layout.imgHeight;
                 const sw = ((seg.box.xmax - seg.box.xmin) / 1000) * layout.imgWidth;
@@ -262,7 +243,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
                 const dw = sw * layout.scale;
                 const dh = sh * layout.scale;
                 const hit = 10;
-
                 if ((Math.abs(mx - dx) < hit && Math.abs(my - dy) < hit) || (Math.abs(mx-(dx+dw))<hit && Math.abs(my-(dy+dh))<hit)) canvasRef.current.style.cursor = 'nwse-resize';
                 else if ((Math.abs(mx-(dx+dw))<hit && Math.abs(my-dy)<hit) || (Math.abs(mx-dx)<hit && Math.abs(my-(dy+dh))<hit)) canvasRef.current.style.cursor = 'nesw-resize';
                 else if (mx > dx && mx < dx + dw && my > dy && my < dy + dh) canvasRef.current.style.cursor = 'move';
@@ -270,17 +250,13 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
             }
         }
     }
-
-    // 2. Drag Logic
     if (dragMode === 'NONE' || !dragStart || !initialBox || !editingSegmentId || !onUpdateSegment) return;
-
     const { x: mx, y: my } = getCanvasCoords(e);
     const layout = getLayout();
     if (!layout) return;
 
     const deltaX = (mx - dragStart.x) / layout.scale / layout.imgWidth * 1000;
     const deltaY = (my - dragStart.y) / layout.scale / layout.imgHeight * 1000;
-
     const newBox = { ...initialBox };
 
     switch (dragMode) {
@@ -307,15 +283,12 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
             newBox.ymax = Math.max(newBox.ymin + 10, initialBox.ymax + deltaY);
             break;
     }
-
-    // Clamp values 0-1000
     const clampedBox = {
         xmin: Math.max(0, Math.min(1000, newBox.xmin)),
         ymin: Math.max(0, Math.min(1000, newBox.ymin)),
         xmax: Math.max(0, Math.min(1000, newBox.xmax)),
         ymax: Math.max(0, Math.min(1000, newBox.ymax))
     };
-
     onUpdateSegment(editingSegmentId, clampedBox);
   };
 
@@ -325,8 +298,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     setInitialBox(null);
   };
 
-
-  // --- AUDIO LOGIC ---
+  // Decode Gemini 2.5 Raw PCM
   const decodePCM = (base64: string, ctx: AudioContext): AudioBuffer => {
     const binaryString = window.atob(base64);
     const len = binaryString.length;
@@ -341,19 +313,30 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     return buffer;
   };
 
-  const playSequence = async (isRecording: boolean) => {
-    // Stop any existing speech just in case
-    window.speechSynthesis.cancel();
+  // Decode Standard Audio (MP3/WAV)
+  const decodeAudio = async (base64: string, ctx: AudioContext): Promise<AudioBuffer> => {
+     const binaryString = window.atob(base64);
+     const len = binaryString.length;
+     const bytes = new Uint8Array(len);
+     for (let i = 0; i < len; i++) {
+         bytes[i] = binaryString.charCodeAt(i);
+     }
+     return await ctx.decodeAudioData(bytes.buffer);
+  };
 
+  const playSequence = async (isRecording: boolean) => {
     if (!audioContextRef.current) {
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
     const actx = audioContextRef.current;
+    
+    // Explicit resume for browser autoplay policy
     if (actx.state === 'suspended') await actx.resume();
 
     // Setup Recording
     if (isRecording && canvasRef.current) {
       destinationRef.current = actx.createMediaStreamDestination();
+      // Increase fps for smoother video if needed
       const canvasStream = canvasRef.current.captureStream(30);
       const combinedStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
@@ -387,70 +370,45 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         let audioDuration = 0;
 
         if (seg.audioBase64) {
-            // --- GEMINI AUDIO PLAYBACK ---
             try {
-              const buffer = decodePCM(seg.audioBase64, actx);
+              let buffer: AudioBuffer;
+              
+              if (seg.audioType === 'mp3') {
+                 buffer = await decodeAudio(seg.audioBase64, actx);
+              } else {
+                 // Default to PCM (Gemini)
+                 buffer = decodePCM(seg.audioBase64, actx);
+              }
+
               audioDuration = buffer.duration;
               const source = actx.createBufferSource();
               source.buffer = buffer;
               const mainOutput = actx.createGain();
               mainOutput.connect(actx.destination);
-              if (isRecording && destinationRef.current) mainOutput.connect(destinationRef.current);
+              
+              // Route to recorder if recording
+              if (isRecording && destinationRef.current) {
+                  mainOutput.connect(destinationRef.current);
+              }
+              
               source.connect(mainOutput);
               source.start(0);
             } catch (err) {
               console.error("Audio playback error", err);
             }
-        } else {
-            // --- MANUAL MODE BROWSER TTS ---
-            // Note: This audio does NOT go to MediaRecorder destination, so export is silent.
-            if (seg.text && seg.text.trim()) {
-                await new Promise<void>((resolve) => {
-                    if (!isPlayingRef.current) { resolve(); return; }
-                    
-                    const u = new SpeechSynthesisUtterance(seg.text);
-                    if (voice) u.voice = voice;
-                    
-                    // Estimate duration if we need to sync visual reveals strictly or wait
-                    u.onend = () => resolve();
-                    u.onerror = (e) => {
-                         console.warn("TTS Error", e);
-                         resolve();
-                    };
-                    
-                    window.speechSynthesis.speak(u);
-                });
-                // We consumed time by awaiting speech, so set audioDuration to minimal or 0 to avoid double waiting
-                audioDuration = 0; 
-            }
         }
         
         // Wait for max(audio, custom_duration)
-        // If we just played Browser TTS, audioDuration is 0, so we wait for custom duration if set, or just proceed.
-        // Actually, Browser TTS promise resolved after speech ended. So we only need to wait extra if duration > speech.
-        const waitTime = Math.max(audioDuration, (seg.duration || 0) - audioDuration) * 1000;
+        const waitTime = Math.max(audioDuration, seg.duration || 0) * 1000;
+        await new Promise(r => setTimeout(r, waitTime));
         
-        // If using browser TTS, we already waited for it to finish.
-        // If we want to support 'minimum duration' even for browser TTS:
-        if (!seg.audioBase64 && seg.duration > 0) {
-             // Browser TTS already took time. If seg.duration is just a fallback, maybe we assume 0 extra wait?
-             // Let's assume duration field is ignored for TTS sync unless it's strictly longer?
-             // Simple approach: Add small buffer
-             await new Promise(r => setTimeout(r, 200));
-        } else {
-             // Gemini audio plays asynchronously, so we wait explicitly
-             if (seg.audioBase64) await new Promise(r => setTimeout(r, waitTime));
-        }
-
-        // Small gap between segments
+        // Small gap
         await new Promise(r => setTimeout(r, 200));
     }
 
-    // CLEANUP
-    window.speechSynthesis.cancel();
-
     if (isRecording && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        await new Promise(r => setTimeout(r, 1000));
+        // Wait for end of last segment audio trail
+        await new Promise(r => setTimeout(r, 500));
         mediaRecorderRef.current.stop();
     } else {
         setAppState(AppState.READY);
@@ -467,7 +425,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     else if (appState === AppState.RECORDING) playSequence(true);
     else {
         isPlayingRef.current = false;
-        window.speechSynthesis.cancel();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appState]);

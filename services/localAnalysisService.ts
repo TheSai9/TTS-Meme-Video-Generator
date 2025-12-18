@@ -136,6 +136,36 @@ const detectPanels = (img: HTMLImageElement): Rect[] => {
   return panels.length > 0 ? panels : [{ x: 0, y: 0, w: width, h: height }];
 };
 
+// Helper to convert Blob to Base64
+const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const result = reader.result as string;
+            // Remove data URL prefix (e.g., "data:audio/mp3;base64,")
+            const base64 = result.split(',')[1];
+            resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+};
+
+export const fetchFreeTTS = async (text: string): Promise<string> => {
+    try {
+        const encodedText = encodeURIComponent(text);
+        // Using StreamElements free TTS API (Brian is a popular voice)
+        const url = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodedText}`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("TTS fetch failed");
+        const blob = await response.blob();
+        return await blobToBase64(blob);
+    } catch (e) {
+        console.warn("Failed to fetch free TTS", e);
+        return "";
+    }
+};
+
 export const analyzeLocalImage = async (base64Image: string): Promise<MemeSegment[]> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -161,12 +191,7 @@ export const analyzeLocalImage = async (base64Image: string): Promise<MemeSegmen
             const cropDataUrl = canvas.toDataURL('image/png');
 
             // Run Tesseract
-            const result = await Tesseract.recognize(
-              cropDataUrl,
-              'eng',
-              // { logger: m => console.log(m) } // Optional logging
-            );
-            
+            const result = await Tesseract.recognize(cropDataUrl, 'eng');
             const text = result.data.text.trim();
             
             // Normalize coordinates to 0-1000 scale
@@ -179,7 +204,7 @@ export const analyzeLocalImage = async (base64Image: string): Promise<MemeSegmen
               id: `local-seg-${i}-${Date.now()}`,
               text: text || `Panel ${i + 1}`, // Fallback if no text
               box: { xmin, ymin, xmax, ymax },
-              duration: 3
+              duration: 2 // Default duration
             });
           }
         }

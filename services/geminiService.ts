@@ -84,7 +84,7 @@ export const analyzeMemeImage = async (base64Image: string): Promise<MemeSegment
   }
 };
 
-export const generateSpeechForSegment = async (text: string): Promise<{ audioBase64: string }> => {
+export const generateSpeechForSegment = async (text: string): Promise<{ audioBase64: string, audioType: 'pcm' }> => {
   const ai = getClient();
   
   // Clean text of brackets for speech
@@ -92,7 +92,7 @@ export const generateSpeechForSegment = async (text: string): Promise<{ audioBas
   
   if (!speechText) {
       // Return silent audio or handle empty
-      return { audioBase64: "" }; 
+      return { audioBase64: "", audioType: 'pcm' }; 
   }
 
   try {
@@ -113,7 +113,7 @@ export const generateSpeechForSegment = async (text: string): Promise<{ audioBas
 
     const audioPart = response.candidates?.[0]?.content?.parts?.[0];
     if (audioPart && audioPart.inlineData && audioPart.inlineData.data) {
-      return { audioBase64: audioPart.inlineData.data };
+      return { audioBase64: audioPart.inlineData.data, audioType: 'pcm' };
     }
     
     console.warn(`No audio data for text: "${speechText}". Response:`, response);

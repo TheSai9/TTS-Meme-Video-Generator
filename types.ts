@@ -10,6 +10,7 @@ export interface MemeSegment {
   text: string;
   box: BoundingBox;
   audioBase64?: string; // Populated after TTS
+  audioType?: 'pcm' | 'mp3'; // 'pcm' for Gemini, 'mp3' for external TTS
   duration: number; // Duration in seconds (defaults to audio length or 2s)
 }
 
