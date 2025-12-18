@@ -1,0 +1,5 @@
+{
+  "name": "MemeReveal",
+  "description": "AI-powered meme narration and video generator using Gemini Vision and TTS.",
+  "requestFramePermissions": []
+}
