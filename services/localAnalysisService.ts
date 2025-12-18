@@ -13,7 +13,40 @@ interface Rect {
   h: number;
 }
 
-// Helper to get image data
+// --- Text Analysis Helpers ---
+
+export const isTextCoherent = (text: string): boolean => {
+  if (!text || text.trim().length < 2) return false;
+  
+  const clean = text.trim();
+  // Check 1: Ratio of alphanumeric characters
+  const alphaNumeric = clean.replace(/[^a-zA-Z0-9]/g, '').length;
+  if (alphaNumeric < clean.length * 0.5) return false; // Mostly symbols/garbage
+
+  // Check 2: Vowel presence (simple heuristic for "real" words in English/Euro langs)
+  const vowels = clean.match(/[aeiouAEIOU]/g);
+  if (!vowels && clean.length > 4) return false; // Long string with no vowels is suspicious
+
+  return true;
+};
+
+export const calculateSegmentDuration = (text: string): number => {
+  if (!text || !isTextCoherent(text)) {
+    return 1.0; // Default for no text or visual-only panels
+  }
+
+  const wordCount = text.trim().split(/\s+/).length;
+  // Average reading speed: ~200wpm = ~3.3 words/sec => ~0.3s per word.
+  // Formula: Reading time + 0.3s buffer
+  const readingTime = wordCount * 0.3; 
+  const duration = readingTime + 0.3;
+
+  // Round to nearest 0.5s for cleaner UI, but ensure min 1s
+  return Math.max(1.0, Math.ceil(duration * 2) / 2);
+};
+
+// --- Image Processing ---
+
 const getImageData = (img: HTMLImageElement): ImageData => {
   const canvas = document.createElement('canvas');
   canvas.width = img.width;
@@ -73,24 +106,18 @@ const detectPanels = (img: HTMLImageElement): Rect[] => {
       rowCuts.push({ y: lineStart, h: y - lineStart });
     }
   }
-  // Handle edge case if image ends with line
   if (inLine) rowCuts.push({ y: lineStart, h: height - lineStart });
 
-  // Define Horizontal Regions (Gaps between lines)
   const rows: { y: number, h: number }[] = [];
-  let currentY = 0;
   
-  // Implicit start line if image doesn't start with one
   if (rowCuts.length > 0 && rowCuts[0].y > 0) {
      rows.push({ y: 0, h: rowCuts[0].y });
-     currentY = rowCuts[0].y + rowCuts[0].h;
   } else if (rowCuts.length === 0) {
       rows.push({ y: 0, h: height });
   }
 
   for (let i = 0; i < rowCuts.length; i++) {
     const cut = rowCuts[i];
-    // Gap after this cut
     const nextY = (i < rowCuts.length - 1) ? rowCuts[i+1].y : height;
     if (nextY - (cut.y + cut.h) > MIN_PANEL_SIZE) {
       rows.push({ y: cut.y + cut.h, h: nextY - (cut.y + cut.h) });
@@ -99,7 +126,6 @@ const detectPanels = (img: HTMLImageElement): Rect[] => {
 
   const panels: Rect[] = [];
 
-  // 2. Scan Vertical Lines within each Row
   rows.forEach(row => {
     let inVLine = false;
     let vLineStart = 0;
@@ -143,7 +169,6 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
         reader.onloadend = () => {
             const result = reader.result as string;
             if (!result) { reject("Empty result"); return; }
-            // Remove data URL prefix (e.g., "data:audio/mp3;base64,")
             const parts = result.split(',');
             resolve(parts.length > 1 ? parts[1] : parts[0]);
         };
@@ -153,7 +178,6 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
 };
 
 const cleanTextForTTS = (text: string): string => {
-    // Remove excess whitespace, newlines, and non-alphanumeric chars that might break URLs
     return text.replace(/\s+/g, ' ').replace(/[^\w\s.,?!'-]/g, '').trim();
 };
 
@@ -164,7 +188,6 @@ export const fetchFreeTTS = async (text: string): Promise<string> => {
 
     try {
         const encodedText = encodeURIComponent(cleanText);
-        // Using StreamElements free TTS API (Brian is a popular voice)
         const url = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodedText}`;
         const response = await fetch(url);
         if (!response.ok) throw new Error(`TTS fetch failed with status: ${response.status}`);
@@ -177,22 +200,49 @@ export const fetchFreeTTS = async (text: string): Promise<string> => {
     }
 };
 
+export const performOCROnBox = async (base64Image: string, box: BoundingBox): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.src = `data:image/png;base64,${base64Image}`;
+        img.onload = async () => {
+            try {
+                const canvas = document.createElement('canvas');
+                // Convert 0-1000 coordinates to pixels
+                const x = (box.xmin / 1000) * img.width;
+                const y = (box.ymin / 1000) * img.height;
+                const w = ((box.xmax - box.xmin) / 1000) * img.width;
+                const h = ((box.ymax - box.ymin) / 1000) * img.height;
+                
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                if(!ctx) throw new Error("Canvas context failed");
+                
+                ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+                const cropDataUrl = canvas.toDataURL('image/png');
+                
+                const result = await Tesseract.recognize(cropDataUrl, 'eng');
+                const text = result.data.text.trim().replace(/\n/g, ' ');
+                resolve(text);
+            } catch (e) {
+                reject(e);
+            }
+        };
+        img.onerror = () => reject("Image load failed");
+    });
+};
+
 export const analyzeLocalImage = async (base64Image: string): Promise<MemeSegment[]> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = `data:image/png;base64,${base64Image}`; 
     img.onload = async () => {
       try {
-        // 1. Detect Panels
         const rects = detectPanels(img);
-        
-        // 2. Perform OCR on each panel
         const segments: MemeSegment[] = [];
 
         for (let i = 0; i < rects.length; i++) {
           const r = rects[i];
-          
-          // Crop image for OCR
           const canvas = document.createElement('canvas');
           canvas.width = r.w;
           canvas.height = r.h;
@@ -201,11 +251,16 @@ export const analyzeLocalImage = async (base64Image: string): Promise<MemeSegmen
             ctx.drawImage(img, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
             const cropDataUrl = canvas.toDataURL('image/png');
 
-            // Run Tesseract
             const result = await Tesseract.recognize(cropDataUrl, 'eng');
-            const text = result.data.text.trim().replace(/\n/g, ' ');
+            const rawText = result.data.text.trim().replace(/\n/g, ' ');
             
-            // Normalize coordinates to 0-1000 scale
+            // Apply Coherence Check
+            const isCoherent = isTextCoherent(rawText);
+            const text = isCoherent ? rawText : ""; 
+
+            // Calculate Duration
+            const duration = calculateSegmentDuration(text);
+
             const xmin = (r.x / img.width) * 1000;
             const ymin = (r.y / img.height) * 1000;
             const xmax = ((r.x + r.w) / img.width) * 1000;
@@ -213,9 +268,9 @@ export const analyzeLocalImage = async (base64Image: string): Promise<MemeSegmen
 
             segments.push({
               id: `local-seg-${i}-${Date.now()}`,
-              text: text || `Panel ${i + 1}`, // Fallback if no text
+              text: text || `(Visual Only)`,
               box: { xmin, ymin, xmax, ymax },
-              duration: 2 // Default duration
+              duration: duration
             });
           }
         }

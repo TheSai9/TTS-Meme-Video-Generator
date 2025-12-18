@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AppState, MemeSegment, BoundingBox } from './types';
 import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiService';
-import { analyzeLocalImage } from './services/localAnalysisService';
+import { analyzeLocalImage, performOCROnBox, calculateSegmentDuration, isTextCoherent } from './services/localAnalysisService';
 import VideoCanvas from './components/VideoCanvas';
 
 const App: React.FC = () => {
@@ -11,6 +11,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
   const [useAI, setUseAI] = useState<boolean>(true);
+  const [isProcessingAction, setIsProcessingAction] = useState<boolean>(false);
   
   // TTS State
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -63,8 +64,6 @@ const App: React.FC = () => {
         try {
             // Local analysis: Heuristic detection + Tesseract OCR
             const analyzedSegments = await analyzeLocalImage(rawBase64);
-            // In manual mode, we rely on Browser TTS (local) during preview.
-            // We do NOT fetch audio blobs here to keep it fast and local.
             setSegments(analyzedSegments);
             setAppState(AppState.READY);
         } catch (e: any) {
@@ -91,10 +90,10 @@ const App: React.FC = () => {
       const segmentsWithAudio = await Promise.all(analyzedSegments.map(async (seg) => {
         try {
           const { audioBase64, audioType } = await generateSpeechForSegment(seg.text);
-          return { ...seg, audioBase64, audioType, duration: 2 }; 
+          return { ...seg, audioBase64, audioType }; // Duration handled in analyzeMemeImage or defaults
         } catch (e) {
           console.error(`Failed to generate audio for segment: ${seg.text}`, e);
-          return { ...seg, duration: 3 }; 
+          return seg;
         }
       }));
 
@@ -141,7 +140,12 @@ const App: React.FC = () => {
   };
 
   const updateSegmentText = (id: string, text: string) => {
-    setSegments(prev => prev.map(s => s.id === id ? { ...s, text } : s));
+    setSegments(prev => prev.map(s => {
+        if (s.id !== id) return s;
+        // Recalculate duration when text changes manually
+        const newDuration = calculateSegmentDuration(text);
+        return { ...s, text, duration: newDuration };
+    }));
   };
 
   const deleteSegment = (id: string) => {
@@ -149,15 +153,66 @@ const App: React.FC = () => {
     setSegments(prev => prev.filter(s => s.id !== id));
   };
 
-  const addSegment = () => {
+  const scanTextForSegment = async (id: string) => {
+      if (!imageSrc) return;
+      const seg = segments.find(s => s.id === id);
+      if (!seg) return;
+
+      setIsProcessingAction(true);
+      try {
+          const rawBase64 = imageSrc.split(',')[1];
+          const text = await performOCROnBox(rawBase64, seg.box);
+          
+          let finalText = "(Visual Only)";
+          if (isTextCoherent(text)) {
+              finalText = text;
+          }
+
+          const duration = calculateSegmentDuration(finalText);
+          
+          setSegments(prev => prev.map(s => s.id === id ? { ...s, text: finalText, duration } : s));
+      } catch (e) {
+          console.error("Scan failed", e);
+      } finally {
+          setIsProcessingAction(false);
+      }
+  };
+
+  const addSegment = async () => {
+    const defaultBox = { xmin: 300, ymin: 300, xmax: 700, ymax: 700 };
+    const newId = `custom-${Date.now()}`;
+    
+    // Preliminary segment
     const newSeg: MemeSegment = {
-        id: `custom-${Date.now()}`,
-        text: "New Reveal",
-        box: { xmin: 300, ymin: 300, xmax: 700, ymax: 700 },
-        duration: 3
+        id: newId,
+        text: "Scanning...",
+        box: defaultBox,
+        duration: 1
     };
-    setSegments([...segments, newSeg]);
-    setEditingSegmentId(newSeg.id);
+    setSegments(prev => [...prev, newSeg]);
+    setEditingSegmentId(newId);
+
+    // Auto-scan the new area
+    if (imageSrc) {
+        setIsProcessingAction(true);
+        try {
+            const rawBase64 = imageSrc.split(',')[1];
+            const text = await performOCROnBox(rawBase64, defaultBox);
+            
+            let finalText = "New Reveal";
+            if (isTextCoherent(text)) {
+                finalText = text;
+            }
+            const duration = calculateSegmentDuration(finalText);
+            
+            setSegments(prev => prev.map(s => s.id === newId ? { ...s, text: finalText, duration } : s));
+        } catch (e) {
+            console.error("Auto-scan on new segment failed", e);
+            setSegments(prev => prev.map(s => s.id === newId ? { ...s, text: "New Reveal" } : s));
+        } finally {
+            setIsProcessingAction(false);
+        }
+    }
   };
 
   return (
@@ -325,9 +380,10 @@ const App: React.FC = () => {
                 </h3>
                 <button 
                   onClick={addSegment}
-                  className="px-2 py-1 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded font-bold"
+                  disabled={isProcessingAction}
+                  className="px-2 py-1 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded font-bold disabled:opacity-50"
                 >
-                  + Add Reveal
+                  {isProcessingAction ? '...' : '+ Add Reveal'}
                 </button>
               </div>
               
@@ -393,6 +449,19 @@ const App: React.FC = () => {
                     {/* Editor Controls */}
                     {editingSegmentId === seg.id && (
                       <div className="mt-3 pt-3 border-t border-slate-700 space-y-3">
+                        <div className="bg-cyan-900/20 p-2 rounded border border-cyan-800/50">
+                            <p className="text-[10px] text-cyan-200 text-center mb-2">
+                                Drag box on image to resize
+                            </p>
+                            <button
+                              onClick={() => scanTextForSegment(seg.id)}
+                              disabled={isProcessingAction}
+                              className="w-full py-1 bg-cyan-700 hover:bg-cyan-600 text-[10px] rounded text-white font-bold disabled:opacity-50"
+                            >
+                                {isProcessingAction ? 'Scanning...' : '📍 Auto-Detect Text In Box'}
+                            </button>
+                        </div>
+                        
                         <div>
                             <label className="text-[10px] text-slate-500 block mb-1">Caption / Notes</label>
                             <input 

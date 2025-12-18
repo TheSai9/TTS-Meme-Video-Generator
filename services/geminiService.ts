@@ -9,6 +9,15 @@ const getClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
+// Helper for consistency with local logic, though implemented simply here to avoid circular dep issues in this context
+const calculateDuration = (text: string): number => {
+    if (!text || text.length < 2) return 1.0;
+    const wordCount = text.trim().split(/\s+/).length;
+    const readingTime = wordCount * 0.3; 
+    const duration = readingTime + 0.3;
+    return Math.max(1.0, Math.ceil(duration * 2) / 2);
+};
+
 export const analyzeMemeImage = async (base64Image: string): Promise<MemeSegment[]> => {
   const ai = getClient();
   
@@ -76,7 +85,7 @@ export const analyzeMemeImage = async (base64Image: string): Promise<MemeSegment
         ymax: seg.ymax,
         xmax: seg.xmax,
       },
-      duration: 2 // Default duration
+      duration: calculateDuration(seg.text)
     }));
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
