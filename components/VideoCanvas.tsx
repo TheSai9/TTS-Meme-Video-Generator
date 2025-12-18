@@ -21,7 +21,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   segments, 
   appState, 
   setAppState,
-  width = 600, 
+  width = 800, 
   height = 600,
   editingSegmentId,
   onUpdateSegment,
@@ -45,6 +45,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   const isPlayingRef = useRef<boolean>(false);
   
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
+  const [canvasDims, setCanvasDims] = useState<{ width: number, height: number }>({ width, height });
 
   // Interaction State
   const [dragMode, setDragMode] = useState<DragMode>('NONE');
@@ -60,19 +61,27 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     img.src = imageSrc;
     img.onload = () => {
       imgRef.current = img;
-      drawFrame();
+      // Update canvas dimensions to match the source image exactly
+      setCanvasDims({ width: img.naturalWidth, height: img.naturalHeight });
     };
   }, [imageSrc]);
 
+  // Redraw when dimensions change (implies image loaded) or segments update
   useEffect(() => {
-    drawFrame();
-  }, [editingSegmentId, segments]);
+    // We rely on canvasDims causing a re-render of the canvas element, 
+    // then this effect runs to draw the frame on the resized canvas.
+    if (imgRef.current) {
+        drawFrame();
+    }
+  }, [canvasDims, editingSegmentId, segments]);
 
   const getLayout = () => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
     if (!canvas || !img) return null;
 
+    // Since we set canvas size to image size, scale is 1 and offsets are 0.
+    // Kept logic generic just in case, but usually scale=1.
     const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
     const x = (canvas.width / 2) - (img.width / 2) * scale;
     const y = (canvas.height / 2) - (img.height / 2) * scale;
@@ -501,8 +510,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
       <div className="relative rounded-xl overflow-hidden shadow-2xl border border-slate-700 bg-slate-900 select-none">
         <canvas 
           ref={canvasRef} 
-          width={width} 
-          height={height}
+          width={canvasDims.width} 
+          height={canvasDims.height}
           className="w-full h-auto max-h-[60vh] object-contain touch-none"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
