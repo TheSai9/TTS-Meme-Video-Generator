@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AppState, MemeSegment, BoundingBox } from './types';
 import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiService';
+import { analyzeLocalImage } from './services/localAnalysisService';
 import VideoCanvas from './components/VideoCanvas';
 
 const App: React.FC = () => {
@@ -26,24 +27,34 @@ const App: React.FC = () => {
 
   const processImage = async (base64: string) => {
     setError(null);
+    setAppState(AppState.ANALYZING);
 
-    // --- MANUAL MODE (No API Calls) ---
+    const rawBase64 = base64.split(',')[1];
+
+    // --- MANUAL MODE (Local/Open Source) ---
     if (!useAI) {
-        setAppState(AppState.READY);
-        setSegments([{
-            id: `manual-init-${Date.now()}`,
-            text: "Edit this text and position the box...",
-            box: { xmin: 200, ymin: 200, xmax: 800, ymax: 800 },
-            duration: 3
-        }]);
+        try {
+            // Local analysis: Heuristic detection + Tesseract OCR
+            const analyzedSegments = await analyzeLocalImage(rawBase64);
+            setSegments(analyzedSegments);
+            setAppState(AppState.READY);
+        } catch (e: any) {
+            console.error("Local Analysis Failed", e);
+            setError("Local analysis failed. Falling back to empty editor.");
+            setSegments([{
+                id: `manual-init-${Date.now()}`,
+                text: "Could not detect panels. Edit manually.",
+                box: { xmin: 100, ymin: 100, xmax: 900, ymax: 900 },
+                duration: 3
+            }]);
+            setAppState(AppState.READY);
+        }
         return;
     }
 
-    // --- AI MODE ---
-    setAppState(AppState.ANALYZING);
+    // --- AI MODE (Gemini) ---
     try {
       // 1. Vision Analysis
-      const rawBase64 = base64.split(',')[1];
       const analyzedSegments = await analyzeMemeImage(rawBase64);
       
       // 2. Generate Audio
@@ -51,7 +62,7 @@ const App: React.FC = () => {
       const segmentsWithAudio = await Promise.all(analyzedSegments.map(async (seg) => {
         try {
           const { audioBase64 } = await generateSpeechForSegment(seg.text);
-          return { ...seg, audioBase64, duration: 2 }; // Default duration, will be approx by audio later
+          return { ...seg, audioBase64, duration: 2 }; 
         } catch (e) {
           console.error(`Failed to generate audio for segment: ${seg.text}`, e);
           return { ...seg, duration: 3 }; 
@@ -176,7 +187,8 @@ const App: React.FC = () => {
 
             {!useAI && (
                <div className="text-center text-xs text-slate-500 bg-slate-900 p-2 rounded border border-slate-800">
-                   Running in <strong className="text-slate-300">Manual Mode</strong>. No API calls will be made. Audio will be silent.
+                   Running in <strong className="text-slate-300">Manual Mode</strong>. 
+                   Using local detection & OCR (Tesseract). No audio.
                </div>
             )}
           </div>
@@ -190,11 +202,13 @@ const App: React.FC = () => {
               <div className="absolute inset-0 border-4 border-cyan-500 rounded-full border-t-transparent animate-spin"></div>
             </div>
             <h3 className="text-xl font-bold animate-pulse text-cyan-300">
-              {appState === AppState.ANALYZING ? 'Vision Model Analyzing...' : 'Generating Narration...'}
+              {appState === AppState.ANALYZING 
+                ? (useAI ? 'Vision Model Analyzing...' : 'Scanning Black Lines & OCR...') 
+                : 'Generating Narration...'}
             </h3>
             <p className="text-slate-400 mt-2 text-sm text-center max-w-xs">
               {appState === AppState.ANALYZING 
-                ? 'Detecting text panels and comedic timing.' 
+                ? (useAI ? 'Detecting text panels and comedic timing.' : 'Running Tesseract.js locally.') 
                 : 'Synthesizing voiceovers using Gemini TTS.'}
             </p>
           </div>
