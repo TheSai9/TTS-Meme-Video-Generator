@@ -9,6 +9,7 @@ const App: React.FC = () => {
   const [segments, setSegments] = useState<MemeSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
+  const [useAI, setUseAI] = useState<boolean>(true);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -24,8 +25,22 @@ const App: React.FC = () => {
   };
 
   const processImage = async (base64: string) => {
-    setAppState(AppState.ANALYZING);
     setError(null);
+
+    // --- MANUAL MODE (No API Calls) ---
+    if (!useAI) {
+        setAppState(AppState.READY);
+        setSegments([{
+            id: `manual-init-${Date.now()}`,
+            text: "Edit this text and position the box...",
+            box: { xmin: 200, ymin: 200, xmax: 800, ymax: 800 },
+            duration: 3
+        }]);
+        return;
+    }
+
+    // --- AI MODE ---
+    setAppState(AppState.ANALYZING);
     try {
       // 1. Vision Analysis
       const rawBase64 = base64.split(',')[1];
@@ -127,20 +142,43 @@ const App: React.FC = () => {
 
         {/* State: IDLE - Upload Area */}
         {appState === AppState.IDLE && (
-          <div className="w-full max-w-xl h-64 border-2 border-dashed border-slate-700 rounded-2xl flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-900/80 transition-all cursor-pointer relative group">
-             <input 
-              type="file" 
-              accept="image/*" 
-              onChange={handleFileUpload} 
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-            />
-            <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-cyan-400">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-              </svg>
+          <div className="flex flex-col gap-6 w-full max-w-xl">
+            
+            {/* Mode Toggle */}
+            <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                <div>
+                    <h3 className="text-sm font-bold text-slate-200">AI Automation</h3>
+                    <p className="text-xs text-slate-500">Use Gemini Vision & TTS to analyze image.</p>
+                </div>
+                <button 
+                    onClick={() => setUseAI(!useAI)}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${useAI ? 'bg-indigo-500' : 'bg-slate-700'}`}
+                >
+                    <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${useAI ? 'translate-x-6' : 'translate-x-0'}`} />
+                </button>
             </div>
-            <h3 className="text-lg font-semibold text-slate-200">Upload a Meme</h3>
-            <p className="text-slate-500 text-sm mt-2">JPG, PNG supported</p>
+
+            <div className="w-full h-64 border-2 border-dashed border-slate-700 rounded-2xl flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-900/80 transition-all cursor-pointer relative group">
+              <input 
+                type="file" 
+                accept="image/*" 
+                onChange={handleFileUpload} 
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+              />
+              <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-cyan-400">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-slate-200">Upload a Meme</h3>
+              <p className="text-slate-500 text-sm mt-2">JPG, PNG supported</p>
+            </div>
+
+            {!useAI && (
+               <div className="text-center text-xs text-slate-500 bg-slate-900 p-2 rounded border border-slate-800">
+                   Running in <strong className="text-slate-300">Manual Mode</strong>. No API calls will be made. Audio will be silent.
+               </div>
+            )}
           </div>
         )}
 
@@ -272,7 +310,7 @@ const App: React.FC = () => {
                       {seg.audioBase64 ? (
                         <span className="text-[10px] bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded">Audio Ready</span>
                       ) : (
-                        <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded">Silent</span>
+                        <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">Silent</span>
                       )}
                       <span className="text-[10px] text-slate-500 font-mono">
                          {seg.duration}s
