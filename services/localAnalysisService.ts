@@ -142,26 +142,37 @@ const blobToBase64 = (blob: Blob): Promise<string> => {
         const reader = new FileReader();
         reader.onloadend = () => {
             const result = reader.result as string;
+            if (!result) { reject("Empty result"); return; }
             // Remove data URL prefix (e.g., "data:audio/mp3;base64,")
-            const base64 = result.split(',')[1];
-            resolve(base64);
+            const parts = result.split(',');
+            resolve(parts.length > 1 ? parts[1] : parts[0]);
         };
         reader.onerror = reject;
         reader.readAsDataURL(blob);
     });
 };
 
+const cleanTextForTTS = (text: string): string => {
+    // Remove excess whitespace, newlines, and non-alphanumeric chars that might break URLs
+    return text.replace(/\s+/g, ' ').replace(/[^\w\s.,?!'-]/g, '').trim();
+};
+
 export const fetchFreeTTS = async (text: string): Promise<string> => {
+    if (!text) return "";
+    const cleanText = cleanTextForTTS(text);
+    if (cleanText.length === 0) return "";
+
     try {
-        const encodedText = encodeURIComponent(text);
+        const encodedText = encodeURIComponent(cleanText);
         // Using StreamElements free TTS API (Brian is a popular voice)
         const url = `https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodedText}`;
         const response = await fetch(url);
-        if (!response.ok) throw new Error("TTS fetch failed");
+        if (!response.ok) throw new Error(`TTS fetch failed with status: ${response.status}`);
         const blob = await response.blob();
+        if (blob.size < 100) throw new Error("TTS blob too small, likely error");
         return await blobToBase64(blob);
     } catch (e) {
-        console.warn("Failed to fetch free TTS", e);
+        console.warn("Failed to fetch free TTS for text: " + text.substring(0,20), e);
         return "";
     }
 };
@@ -169,7 +180,7 @@ export const fetchFreeTTS = async (text: string): Promise<string> => {
 export const analyzeLocalImage = async (base64Image: string): Promise<MemeSegment[]> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.src = `data:image/png;base64,${base64Image}`; // Ensure prefix if missing, though usually provided
+    img.src = `data:image/png;base64,${base64Image}`; 
     img.onload = async () => {
       try {
         // 1. Detect Panels
@@ -192,7 +203,7 @@ export const analyzeLocalImage = async (base64Image: string): Promise<MemeSegmen
 
             // Run Tesseract
             const result = await Tesseract.recognize(cropDataUrl, 'eng');
-            const text = result.data.text.trim();
+            const text = result.data.text.trim().replace(/\n/g, ' ');
             
             // Normalize coordinates to 0-1000 scale
             const xmin = (r.x / img.width) * 1000;

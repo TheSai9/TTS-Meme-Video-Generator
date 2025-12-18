@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, MouseEvent } from 'react';
 import { MemeSegment, AppState, BoundingBox } from '../types';
+import { fetchFreeTTS } from '../services/localAnalysisService';
 
 interface VideoCanvasProps {
   imageSrc: string;
@@ -23,11 +24,15 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   width = 600, 
   height = 600,
   editingSegmentId,
-  onUpdateSegment
+  onUpdateSegment,
+  voice
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  
+  // State Refs
+  const appStateRef = useRef(appState);
   
   // Recording refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -45,7 +50,10 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
   const [initialBox, setInitialBox] = useState<BoundingBox | null>(null);
 
-  // Initialize Image
+  useEffect(() => {
+    appStateRef.current = appState;
+  }, [appState]);
+
   useEffect(() => {
     const img = new Image();
     img.src = imageSrc;
@@ -55,7 +63,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     };
   }, [imageSrc]);
 
-  // Effect to redraw when editing state changes
   useEffect(() => {
     drawFrame();
   }, [editingSegmentId, segments]);
@@ -78,10 +85,11 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     const img = imgRef.current;
+    const currentState = appStateRef.current; 
 
     if (!canvas || !ctx || !img) return;
 
-    // Clear background
+    // Clear
     ctx.fillStyle = '#1e293b';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -122,14 +130,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         
         ctx.fillStyle = '#fff';
         const hs = 8;
-        
-        const handles = [
-            { x: dx, y: dy },
-            { x: dx + dw, y: dy },
-            { x: dx, y: dy + dh },
-            { x: dx + dw, y: dy + dh }
-        ];
-
+        const handles = [{ x: dx, y: dy }, { x: dx + dw, y: dy }, { x: dx, y: dy + dh }, { x: dx + dw, y: dy + dh }];
         handles.forEach(h => {
             ctx.fillRect(h.x - hs/2, h.y - hs/2, hs, hs);
             ctx.strokeRect(h.x - hs/2, h.y - hs/2, hs, hs);
@@ -144,9 +145,9 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     ctx.filter = 'none';
 
     const currentIndex = currentSegmentIndexRef.current;
-    const maxIndex = (appState === AppState.PLAYING || appState === AppState.RECORDING) 
+    const maxIndex = (currentState === AppState.PLAYING || currentState === AppState.RECORDING) 
       ? currentIndex 
-      : (appState === AppState.READY ? -1 : segments.length - 1);
+      : (currentState === AppState.READY ? -1 : segments.length - 1);
 
     segments.forEach((seg, index) => {
       if (index <= maxIndex && index >= 0) {
@@ -167,8 +168,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         ctx.drawImage(img, x, y, w, h);
         ctx.restore();
 
-        // ONLY draw highlight if NOT recording
-        if (index === currentIndex && appState !== AppState.RECORDING) {
+        // Highlight only if NOT recording
+        if (index === currentIndex && currentState !== AppState.RECORDING) {
           ctx.strokeStyle = '#facc15';
           ctx.lineWidth = 4;
           ctx.shadowColor = '#facc15';
@@ -321,7 +322,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
      for (let i = 0; i < len; i++) {
          bytes[i] = binaryString.charCodeAt(i);
      }
-     return await ctx.decodeAudioData(bytes.buffer);
+     return await ctx.decodeAudioData(bytes.buffer.slice(0));
   };
 
   const playSequence = async (isRecording: boolean) => {
@@ -330,31 +331,46 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     }
     const actx = audioContextRef.current;
     
-    // Explicit resume for browser autoplay policy
     if (actx.state === 'suspended') await actx.resume();
 
     // Setup Recording
     if (isRecording && canvasRef.current) {
+      const mimeTypes = [
+          "video/webm;codecs=vp9,opus",
+          "video/webm;codecs=vp8,opus",
+          "video/webm",
+          "video/mp4"
+      ];
+      const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || "video/webm";
+
       destinationRef.current = actx.createMediaStreamDestination();
-      // Increase fps for smoother video if needed
       const canvasStream = canvasRef.current.captureStream(30);
       const combinedStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
         ...destinationRef.current.stream.getAudioTracks()
       ]);
-      mediaRecorderRef.current = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
-      recordedChunksRef.current = [];
-      mediaRecorderRef.current.ondataavailable = (e) => { if (e.data.size > 0) recordedChunksRef.current.push(e.data); };
-      mediaRecorderRef.current.onstop = () => {
-        const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `meme-reveal-${Date.now()}.webm`;
-        a.click();
-        setAppState(AppState.READY);
-      };
-      mediaRecorderRef.current.start();
+      
+      try {
+        mediaRecorderRef.current = new MediaRecorder(combinedStream, { mimeType });
+        recordedChunksRef.current = [];
+        mediaRecorderRef.current.ondataavailable = (e) => { 
+            if (e.data.size > 0) recordedChunksRef.current.push(e.data); 
+        };
+        mediaRecorderRef.current.onstop = () => {
+            const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `meme-reveal-${Date.now()}.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
+            a.click();
+            setAppState(AppState.READY);
+        };
+        mediaRecorderRef.current.start();
+      } catch (e) {
+          console.error("MediaRecorder failed to start", e);
+          setAppState(AppState.READY);
+          return;
+      }
     }
 
     isPlayingRef.current = true;
@@ -370,44 +386,78 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         let audioDuration = 0;
 
         if (seg.audioBase64) {
+            // CASE 1: Pre-existing Audio Blob (Gemini or Regenerated)
             try {
               let buffer: AudioBuffer;
-              
               if (seg.audioType === 'mp3') {
                  buffer = await decodeAudio(seg.audioBase64, actx);
               } else {
-                 // Default to PCM (Gemini)
                  buffer = decodePCM(seg.audioBase64, actx);
               }
-
               audioDuration = buffer.duration;
               const source = actx.createBufferSource();
               source.buffer = buffer;
               const mainOutput = actx.createGain();
               mainOutput.connect(actx.destination);
-              
-              // Route to recorder if recording
-              if (isRecording && destinationRef.current) {
-                  mainOutput.connect(destinationRef.current);
-              }
-              
+              if (isRecording && destinationRef.current) mainOutput.connect(destinationRef.current);
               source.connect(mainOutput);
               source.start(0);
             } catch (err) {
               console.error("Audio playback error", err);
             }
+        } else if (seg.text) {
+             // CASE 2: No Blob - Manual Mode
+             if (isRecording) {
+                 // RECORDING: Try to fetch audio just-in-time
+                 try {
+                     const fetchedAudio = await fetchFreeTTS(seg.text);
+                     if (fetchedAudio) {
+                         const buffer = await decodeAudio(fetchedAudio, actx);
+                         audioDuration = buffer.duration;
+                         const source = actx.createBufferSource();
+                         source.buffer = buffer;
+                         const mainOutput = actx.createGain();
+                         mainOutput.connect(actx.destination);
+                         if (destinationRef.current) mainOutput.connect(destinationRef.current);
+                         source.connect(mainOutput);
+                         source.start(0);
+                     }
+                 } catch (e) {
+                     console.warn("JIT Audio fetch failed for export", e);
+                 }
+             } else {
+                 // PREVIEW: Use Browser TTS (SpeechSynthesis)
+                 // This cannot be recorded, so audioDuration remains 0 (wait loop handles sync)
+                 await new Promise<void>((resolve) => {
+                     if (!isPlayingRef.current) { resolve(); return; }
+                     const u = new SpeechSynthesisUtterance(seg.text);
+                     if (voice) u.voice = voice;
+                     u.onend = () => resolve();
+                     u.onerror = () => resolve();
+                     window.speechSynthesis.speak(u);
+                 });
+             }
         }
         
-        // Wait for max(audio, custom_duration)
+        // Wait logic
         const waitTime = Math.max(audioDuration, seg.duration || 0) * 1000;
-        await new Promise(r => setTimeout(r, waitTime));
+        if (audioDuration > 0) {
+            // If we played an audio buffer, wait for it
+            await new Promise(r => setTimeout(r, waitTime));
+        } else {
+            // If we used Browser TTS, we already awaited the speech. 
+            // Only wait extra if duration > speech (approximated by assuming duration is total time)
+            // But since we can't measure speech time precisely without measuring start/end,
+            // we effectively just waited for speech. If manual duration is very long, wait remainder?
+            // Simplification: if Browser TTS, just pause a bit extra.
+            if (!isRecording) await new Promise(r => setTimeout(r, 500));
+            else await new Promise(r => setTimeout(r, waitTime)); // For recording silence/JIT audio
+        }
         
-        // Small gap
         await new Promise(r => setTimeout(r, 200));
     }
 
     if (isRecording && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        // Wait for end of last segment audio trail
         await new Promise(r => setTimeout(r, 500));
         mediaRecorderRef.current.stop();
     } else {
@@ -425,8 +475,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     else if (appState === AppState.RECORDING) playSequence(true);
     else {
         isPlayingRef.current = false;
+        window.speechSynthesis.cancel();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appState]);
 
   return (

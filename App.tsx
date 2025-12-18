@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppState, MemeSegment, BoundingBox } from './types';
 import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiService';
-import { analyzeLocalImage, fetchFreeTTS } from './services/localAnalysisService';
+import { analyzeLocalImage } from './services/localAnalysisService';
 import VideoCanvas from './components/VideoCanvas';
 
 const App: React.FC = () => {
@@ -11,6 +11,33 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
   const [useAI, setUseAI] = useState<boolean>(true);
+  
+  // TTS State
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('');
+
+  useEffect(() => {
+    const loadVoices = () => {
+      const available = window.speechSynthesis.getVoices();
+      setVoices(available);
+      if (available.length > 0 && !selectedVoiceName) {
+        // Try to find a good default (Google US English or similar)
+        const defaultVoice = available.find(v => v.name.includes('Google US English')) || available[0];
+        setSelectedVoiceName(defaultVoice.name);
+      }
+    };
+    
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, [selectedVoiceName]);
+
+  const getSelectedVoice = () => {
+      return voices.find(v => v.name === selectedVoiceName) || null;
+  };
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -36,18 +63,9 @@ const App: React.FC = () => {
         try {
             // Local analysis: Heuristic detection + Tesseract OCR
             const analyzedSegments = await analyzeLocalImage(rawBase64);
-            
-            // Generate Audio for Manual Segments (StreamElements API)
-            setAppState(AppState.GENERATING_AUDIO);
-            const segmentsWithAudio = await Promise.all(analyzedSegments.map(async (seg) => {
-                if (seg.text && seg.text.length > 1) {
-                    const audioBase64 = await fetchFreeTTS(seg.text);
-                    return { ...seg, audioBase64, audioType: 'mp3' as const, duration: 2 };
-                }
-                return seg;
-            }));
-            
-            setSegments(segmentsWithAudio);
+            // In manual mode, we rely on Browser TTS (local) during preview.
+            // We do NOT fetch audio blobs here to keep it fast and local.
+            setSegments(analyzedSegments);
             setAppState(AppState.READY);
         } catch (e: any) {
             console.error("Local Analysis Failed", e);
@@ -123,8 +141,6 @@ const App: React.FC = () => {
   };
 
   const updateSegmentText = (id: string, text: string) => {
-    // If updating text in manual mode, we could potentially re-fetch audio here.
-    // For simplicity, we just update text. Re-generation would require a button or debounce.
     setSegments(prev => prev.map(s => s.id === id ? { ...s, text } : s));
   };
 
@@ -182,6 +198,23 @@ const App: React.FC = () => {
                 </button>
             </div>
 
+            {/* Manual Mode Settings (Voice Selection) */}
+            {!useAI && (
+              <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                  <label className="text-xs font-bold text-slate-400 block mb-2">Narrator Voice (Local Browser TTS)</label>
+                  <select 
+                    value={selectedVoiceName}
+                    onChange={(e) => setSelectedVoiceName(e.target.value)}
+                    className="w-full bg-slate-800 text-slate-200 text-xs p-2 rounded border border-slate-700 focus:border-cyan-500 outline-none"
+                  >
+                    {voices.length === 0 && <option value="">Loading voices...</option>}
+                    {voices.map(v => (
+                      <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
+                    ))}
+                  </select>
+              </div>
+            )}
+
             <div className="w-full h-64 border-2 border-dashed border-slate-700 rounded-2xl flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-900/80 transition-all cursor-pointer relative group">
               <input 
                 type="file" 
@@ -201,7 +234,7 @@ const App: React.FC = () => {
             {!useAI && (
                <div className="text-center text-xs text-slate-500 bg-slate-900 p-2 rounded border border-slate-800">
                    Running in <strong className="text-slate-300">Manual Mode</strong>. 
-                   Using local detection & OCR. Audio provided by Free TTS (StreamElements).
+                   Using local detection & OCR. Audio provided by your Browser.
                </div>
             )}
           </div>
@@ -222,7 +255,7 @@ const App: React.FC = () => {
             <p className="text-slate-400 mt-2 text-sm text-center max-w-xs">
               {appState === AppState.ANALYZING 
                 ? (useAI ? 'Detecting text panels and comedic timing.' : 'Running Tesseract.js locally.') 
-                : 'Fetching audio...'}
+                : 'Preparing Editor...'}
             </p>
           </div>
         )}
@@ -242,6 +275,7 @@ const App: React.FC = () => {
                 height={600}
                 editingSegmentId={editingSegmentId}
                 onUpdateSegment={updateSegmentBox}
+                voice={getSelectedVoice()}
               />
               
               {/* Controls */}
@@ -275,6 +309,12 @@ const App: React.FC = () => {
                   Reset
                 </button>
               </div>
+              
+              {!useAI && (
+                 <p className="text-[10px] text-slate-500 mt-2 italic max-w-md text-center">
+                     Preview uses Local Browser Voices. Export attempts to fetch audio from a free service to ensure sound in the video file.
+                 </p>
+              )}
             </div>
 
             {/* Right: Segment List */}
@@ -339,7 +379,11 @@ const App: React.FC = () => {
                            {seg.audioType === 'mp3' ? 'MP3 Ready' : 'Audio Ready'}
                         </span>
                       ) : (
-                        <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">Silent</span>
+                        seg.text ? (
+                            <span className="text-[10px] bg-indigo-900/50 text-indigo-300 px-1.5 py-0.5 rounded">Browser TTS</span>
+                        ) : (
+                            <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">Silent</span>
+                        )
                       )}
                       <span className="text-[10px] text-slate-500 font-mono">
                          {seg.duration}s
@@ -358,6 +402,7 @@ const App: React.FC = () => {
                                 className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white"
                             />
                         </div>
+
                         <div>
                             <label className="text-[10px] text-slate-500 block mb-1">Duration (seconds)</label>
                             <input 
@@ -366,12 +411,6 @@ const App: React.FC = () => {
                                 onChange={(e) => updateSegmentDuration(seg.id, Number(e.target.value))}
                                 className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white"
                             />
-                            <p className="text-[9px] text-slate-500 mt-1">If audio is longer, audio length is used.</p>
-                        </div>
-                        <div className="bg-cyan-900/20 p-2 rounded border border-cyan-800/50">
-                            <p className="text-[10px] text-cyan-200 text-center">
-                                Drag box on image to resize
-                            </p>
                         </div>
                       </div>
                     )}
