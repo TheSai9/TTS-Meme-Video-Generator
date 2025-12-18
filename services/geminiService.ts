@@ -75,7 +75,8 @@ export const analyzeMemeImage = async (base64Image: string): Promise<MemeSegment
         xmin: seg.xmin,
         ymax: seg.ymax,
         xmax: seg.xmax,
-      }
+      },
+      duration: 2 // Default duration
     }));
   } catch (error) {
     console.error("Gemini Analysis Error:", error);

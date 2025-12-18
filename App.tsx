@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { AppState, MemeSegment, BoundingBox } from './types';
 import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiService';
 import VideoCanvas from './components/VideoCanvas';
@@ -30,17 +30,16 @@ const App: React.FC = () => {
       // 1. Vision Analysis
       const rawBase64 = base64.split(',')[1];
       const analyzedSegments = await analyzeMemeImage(rawBase64);
-      setSegments(analyzedSegments);
       
       // 2. Generate Audio
       setAppState(AppState.GENERATING_AUDIO);
       const segmentsWithAudio = await Promise.all(analyzedSegments.map(async (seg) => {
         try {
           const { audioBase64 } = await generateSpeechForSegment(seg.text);
-          return { ...seg, audioBase64 };
+          return { ...seg, audioBase64, duration: 2 }; // Default duration, will be approx by audio later
         } catch (e) {
           console.error(`Failed to generate audio for segment: ${seg.text}`, e);
-          return seg; // Return without audio if fails
+          return { ...seg, duration: 3 }; 
         }
       }));
 
@@ -80,6 +79,30 @@ const App: React.FC = () => {
         box: { ...s.box, ...partialBox } 
       };
     }));
+  };
+  
+  const updateSegmentDuration = (id: string, duration: number) => {
+     setSegments(prev => prev.map(s => s.id === id ? { ...s, duration } : s));
+  };
+
+  const updateSegmentText = (id: string, text: string) => {
+    setSegments(prev => prev.map(s => s.id === id ? { ...s, text } : s));
+  };
+
+  const deleteSegment = (id: string) => {
+    if(editingSegmentId === id) setEditingSegmentId(null);
+    setSegments(prev => prev.filter(s => s.id !== id));
+  };
+
+  const addSegment = () => {
+    const newSeg: MemeSegment = {
+        id: `custom-${Date.now()}`,
+        text: "New Reveal",
+        box: { xmin: 300, ymin: 300, xmax: 700, ymax: 700 },
+        duration: 3
+    };
+    setSegments([...segments, newSeg]);
+    setEditingSegmentId(newSeg.id);
   };
 
   return (
@@ -153,6 +176,7 @@ const App: React.FC = () => {
                 width={800}
                 height={600}
                 editingSegmentId={editingSegmentId}
+                onUpdateSegment={updateSegmentBox}
               />
               
               {/* Controls */}
@@ -189,11 +213,20 @@ const App: React.FC = () => {
             </div>
 
             {/* Right: Segment List */}
-            <div className="lg:col-span-1 bg-slate-900/50 rounded-xl p-4 border border-slate-800 h-fit max-h-[600px] overflow-y-auto">
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 sticky top-0 bg-slate-900/95 py-2 z-10">
-                Narrative Timeline
-              </h3>
-              <div className="space-y-3">
+            <div className="lg:col-span-1 bg-slate-900/50 rounded-xl p-4 border border-slate-800 h-fit max-h-[600px] overflow-y-auto flex flex-col">
+              <div className="flex justify-between items-center mb-4 sticky top-0 bg-slate-900/95 py-2 z-10 border-b border-slate-700">
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">
+                   Timeline
+                </h3>
+                <button 
+                  onClick={addSegment}
+                  className="px-2 py-1 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded font-bold"
+                >
+                  + Add Reveal
+                </button>
+              </div>
+              
+              <div className="space-y-3 flex-1">
                 {segments.map((seg, idx) => (
                   <div key={seg.id} className={`p-3 rounded border transition-colors ${editingSegmentId === seg.id ? 'bg-slate-800/80 border-cyan-500 ring-1 ring-cyan-500/50' : 'bg-slate-800 border-slate-700 hover:border-indigo-500/50'}`}>
                     
@@ -202,11 +235,17 @@ const App: React.FC = () => {
                       <span className="text-xs font-mono text-slate-400">#{idx + 1}</span>
                       
                       <div className="flex gap-1">
+                         <button 
+                          onClick={() => deleteSegment(seg.id)}
+                          className="p-1 hover:bg-red-900/50 text-slate-500 hover:text-red-400 rounded mr-2"
+                          title="Delete"
+                        >
+                          ✕
+                        </button>
                         <button 
                           onClick={() => moveSegment(idx, 'up')} 
                           disabled={idx === 0 || editingSegmentId !== null}
                           className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white disabled:opacity-30"
-                          title="Move Up"
                         >
                           ↑
                         </button>
@@ -214,7 +253,6 @@ const App: React.FC = () => {
                           onClick={() => moveSegment(idx, 'down')} 
                           disabled={idx === segments.length - 1 || editingSegmentId !== null}
                           className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white disabled:opacity-30"
-                          title="Move Down"
                         >
                           ↓
                         </button>
@@ -227,59 +265,46 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <p className="text-sm text-slate-200 line-clamp-2 mb-2">{seg.text}</p>
+                    <p className="text-sm text-slate-200 line-clamp-2 mb-2 font-medium">{seg.text}</p>
                     
                     {/* Status Badges */}
-                    <div className="flex gap-2 mb-2">
+                    <div className="flex gap-2 mb-2 items-center">
                       {seg.audioBase64 ? (
                         <span className="text-[10px] bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded">Audio Ready</span>
                       ) : (
                         <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded">Silent</span>
                       )}
+                      <span className="text-[10px] text-slate-500 font-mono">
+                         {seg.duration}s
+                      </span>
                     </div>
 
                     {/* Editor Controls */}
                     {editingSegmentId === seg.id && (
                       <div className="mt-3 pt-3 border-t border-slate-700 space-y-3">
-                        <div className="text-[10px] uppercase font-bold text-cyan-400 mb-1">Adjust Reveal Area</div>
-                        
-                        <div className="grid grid-cols-2 gap-2">
-                            <div>
-                                <label className="text-[10px] text-slate-500 block mb-1">Left (X)</label>
-                                <input 
-                                    type="range" min="0" max="1000" 
-                                    value={seg.box.xmin}
-                                    onChange={(e) => updateSegmentBox(seg.id, { xmin: Number(e.target.value) })}
-                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-[10px] text-slate-500 block mb-1">Top (Y)</label>
-                                <input 
-                                    type="range" min="0" max="1000" 
-                                    value={seg.box.ymin}
-                                    onChange={(e) => updateSegmentBox(seg.id, { ymin: Number(e.target.value) })}
-                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-[10px] text-slate-500 block mb-1">Width (Right)</label>
-                                <input 
-                                    type="range" min="0" max="1000" 
-                                    value={seg.box.xmax}
-                                    onChange={(e) => updateSegmentBox(seg.id, { xmax: Number(e.target.value) })}
-                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                                />
-                            </div>
-                            <div>
-                                <label className="text-[10px] text-slate-500 block mb-1">Height (Bottom)</label>
-                                <input 
-                                    type="range" min="0" max="1000" 
-                                    value={seg.box.ymax}
-                                    onChange={(e) => updateSegmentBox(seg.id, { ymax: Number(e.target.value) })}
-                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
-                                />
-                            </div>
+                        <div>
+                            <label className="text-[10px] text-slate-500 block mb-1">Caption / Notes</label>
+                            <input 
+                                type="text"
+                                value={seg.text}
+                                onChange={(e) => updateSegmentText(seg.id, e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] text-slate-500 block mb-1">Duration (seconds)</label>
+                            <input 
+                                type="number" step="0.5" min="0.5"
+                                value={seg.duration}
+                                onChange={(e) => updateSegmentDuration(seg.id, Number(e.target.value))}
+                                className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white"
+                            />
+                            <p className="text-[9px] text-slate-500 mt-1">If audio is longer, audio length is used.</p>
+                        </div>
+                        <div className="bg-cyan-900/20 p-2 rounded border border-cyan-800/50">
+                            <p className="text-[10px] text-cyan-200 text-center">
+                                Drag box on image to resize
+                            </p>
                         </div>
                       </div>
                     )}

@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { MemeSegment, AppState } from '../types';
+import React, { useRef, useEffect, useState, MouseEvent } from 'react';
+import { MemeSegment, AppState, BoundingBox } from '../types';
 
 interface VideoCanvasProps {
   imageSrc: string;
@@ -9,7 +9,10 @@ interface VideoCanvasProps {
   width?: number;
   height?: number;
   editingSegmentId?: string | null;
+  onUpdateSegment?: (id: string, box: BoundingBox) => void;
 }
+
+type DragMode = 'NONE' | 'MOVE' | 'RESIZE_TL' | 'RESIZE_TR' | 'RESIZE_BL' | 'RESIZE_BR';
 
 const VideoCanvas: React.FC<VideoCanvasProps> = ({ 
   imageSrc, 
@@ -18,7 +21,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   setAppState,
   width = 600, 
   height = 600,
-  editingSegmentId
+  editingSegmentId,
+  onUpdateSegment
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -29,11 +33,16 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   const destinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
 
-  // Playback state refs (using refs for animation loop)
+  // Playback state refs
   const currentSegmentIndexRef = useRef<number>(-1);
   const isPlayingRef = useRef<boolean>(false);
   
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
+
+  // Interaction State
+  const [dragMode, setDragMode] = useState<DragMode>('NONE');
+  const [dragStart, setDragStart] = useState<{ x: number, y: number } | null>(null);
+  const [initialBox, setInitialBox] = useState<BoundingBox | null>(null);
 
   // Initialize Image
   useEffect(() => {
@@ -50,6 +59,21 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     drawFrame();
   }, [editingSegmentId, segments]);
 
+  // Helper: Get layout metrics for the image on canvas
+  const getLayout = () => {
+    const canvas = canvasRef.current;
+    const img = imgRef.current;
+    if (!canvas || !img) return null;
+
+    const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+    const x = (canvas.width / 2) - (img.width / 2) * scale;
+    const y = (canvas.height / 2) - (img.height / 2) * scale;
+    const w = img.width * scale;
+    const h = img.height * scale;
+
+    return { x, y, w, h, scale, imgWidth: img.width, imgHeight: img.height };
+  };
+
   // Main Draw Loop
   const drawFrame = () => {
     const canvas = canvasRef.current;
@@ -62,20 +86,17 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     ctx.fillStyle = '#1e293b';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Calculate Aspect Ratio fit
-    const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
-    const x = (canvas.width / 2) - (img.width / 2) * scale;
-    const y = (canvas.height / 2) - (img.height / 2) * scale;
-    const w = img.width * scale;
-    const h = img.height * scale;
+    const layout = getLayout();
+    if (!layout) return;
+    const { x, y, w, h, scale } = layout;
 
     // --- EDIT MODE RENDERING ---
     if (editingSegmentId) {
       // Draw full image
       ctx.drawImage(img, x, y, w, h);
       
-      // Overlay a semi-transparent dark layer to focus attention on the box
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      // Overlay
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.fillRect(x, y, w, h);
 
       const seg = segments.find(s => s.id === editingSegmentId);
@@ -90,7 +111,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         const dw = sw * scale;
         const dh = sh * scale;
 
-        // Cut out the "hole" to show the clear image
+        // Clear Cutout
         ctx.save();
         ctx.beginPath();
         ctx.rect(dx, dy, dw, dh);
@@ -98,40 +119,46 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         ctx.drawImage(img, x, y, w, h);
         ctx.restore();
 
-        // Draw active edit border
-        ctx.strokeStyle = '#06b6d4'; // Cyan-500
-        ctx.lineWidth = 3;
-        ctx.setLineDash([5, 5]);
+        // Border
+        ctx.strokeStyle = '#06b6d4';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
         ctx.strokeRect(dx, dy, dw, dh);
         ctx.setLineDash([]);
         
-        // Draw corner handles (visual only for now)
-        ctx.fillStyle = '#06b6d4';
-        const handleSize = 6;
-        ctx.fillRect(dx - handleSize/2, dy - handleSize/2, handleSize, handleSize); // TL
-        ctx.fillRect(dx + dw - handleSize/2, dy + dh - handleSize/2, handleSize, handleSize); // BR
+        // Handles
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#06b6d4';
+        const hs = 8; // Handle size
+        
+        // TL, TR, BL, BR
+        const handles = [
+            { x: dx, y: dy },
+            { x: dx + dw, y: dy },
+            { x: dx, y: dy + dh },
+            { x: dx + dw, y: dy + dh }
+        ];
+
+        handles.forEach(h => {
+            ctx.fillRect(h.x - hs/2, h.y - hs/2, hs, hs);
+            ctx.strokeRect(h.x - hs/2, h.y - hs/2, hs, hs);
+        });
       }
       return;
     }
 
-    // --- NORMAL / PLAYBACK RENDERING ---
-
-    // Draw the blurred base image (The "Hidden" state)
+    // --- PLAYBACK RENDERING ---
     ctx.filter = 'blur(15px) brightness(0.6)';
     ctx.drawImage(img, x, y, w, h);
-    ctx.filter = 'none'; // Reset filter
+    ctx.filter = 'none';
 
-    // Draw Revealed Segments
     const currentIndex = currentSegmentIndexRef.current;
-    
-    // We reveal all segments up to the current one
     const maxIndex = (appState === AppState.PLAYING || appState === AppState.RECORDING) 
       ? currentIndex 
       : (appState === AppState.READY ? -1 : segments.length - 1);
 
     segments.forEach((seg, index) => {
       if (index <= maxIndex && index >= 0) {
-        // Convert 0-1000 coords to canvas coords relative to the image placement
         const sx = (seg.box.xmin / 1000) * img.width;
         const sy = (seg.box.ymin / 1000) * img.height;
         const sw = ((seg.box.xmax - seg.box.xmin) / 1000) * img.width;
@@ -142,18 +169,15 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         const dw = sw * scale;
         const dh = sh * scale;
 
-        // Draw clean slice
         ctx.save();
-        // Soft clipping for smoother edges
         ctx.beginPath();
         ctx.rect(dx, dy, dw, dh);
         ctx.clip();
         ctx.drawImage(img, x, y, w, h);
         ctx.restore();
 
-        // Highlight active segment border
         if (index === currentIndex) {
-          ctx.strokeStyle = '#facc15'; // Yellow neon
+          ctx.strokeStyle = '#facc15';
           ctx.lineWidth = 4;
           ctx.shadowColor = '#facc15';
           ctx.shadowBlur = 10;
@@ -163,13 +187,144 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
       }
     });
 
-    // Request next frame if playing
     if (isPlayingRef.current) {
         requestAnimationFrame(drawFrame);
     }
   };
 
-  // Helper to decode raw PCM audio from Gemini
+  // --- MOUSE INTERACTION HANDLERS ---
+
+  const getCanvasCoords = (e: MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const handleMouseDown = (e: MouseEvent) => {
+    if (!editingSegmentId || !onUpdateSegment) return;
+    
+    const { x: mx, y: my } = getCanvasCoords(e);
+    const layout = getLayout();
+    if (!layout) return;
+
+    const seg = segments.find(s => s.id === editingSegmentId);
+    if (!seg) return;
+
+    // Calculate handle positions in canvas coords
+    const sx = (seg.box.xmin / 1000) * layout.imgWidth;
+    const sy = (seg.box.ymin / 1000) * layout.imgHeight;
+    const sw = ((seg.box.xmax - seg.box.xmin) / 1000) * layout.imgWidth;
+    const sh = ((seg.box.ymax - seg.box.ymin) / 1000) * layout.imgHeight;
+
+    const dx = layout.x + sx * layout.scale;
+    const dy = layout.y + sy * layout.scale;
+    const dw = sw * layout.scale;
+    const dh = sh * layout.scale;
+    
+    const hitDist = 15; // Hit area for handles
+
+    // Check Handles
+    if (Math.abs(mx - dx) < hitDist && Math.abs(my - dy) < hitDist) setDragMode('RESIZE_TL');
+    else if (Math.abs(mx - (dx + dw)) < hitDist && Math.abs(my - dy) < hitDist) setDragMode('RESIZE_TR');
+    else if (Math.abs(mx - dx) < hitDist && Math.abs(my - (dy + dh)) < hitDist) setDragMode('RESIZE_BL');
+    else if (Math.abs(mx - (dx + dw)) < hitDist && Math.abs(my - (dy + dh)) < hitDist) setDragMode('RESIZE_BR');
+    // Check Inside
+    else if (mx > dx && mx < dx + dw && my > dy && my < dy + dh) setDragMode('MOVE');
+    else return;
+
+    setDragStart({ x: mx, y: my });
+    setInitialBox({ ...seg.box });
+  };
+
+  const handleMouseMove = (e: MouseEvent) => {
+    // 1. Cursor Styling Logic (Even if not dragging)
+    if (editingSegmentId && !dragStart) {
+        const { x: mx, y: my } = getCanvasCoords(e);
+        const layout = getLayout();
+        if (layout && canvasRef.current) {
+            const seg = segments.find(s => s.id === editingSegmentId);
+            if (seg) {
+                // ... Re-calculate positions (copy-paste logic for brevity, ideally shared)
+                const sx = (seg.box.xmin / 1000) * layout.imgWidth;
+                const sy = (seg.box.ymin / 1000) * layout.imgHeight;
+                const sw = ((seg.box.xmax - seg.box.xmin) / 1000) * layout.imgWidth;
+                const sh = ((seg.box.ymax - seg.box.ymin) / 1000) * layout.imgHeight;
+                const dx = layout.x + sx * layout.scale;
+                const dy = layout.y + sy * layout.scale;
+                const dw = sw * layout.scale;
+                const dh = sh * layout.scale;
+                const hit = 10;
+
+                if ((Math.abs(mx - dx) < hit && Math.abs(my - dy) < hit) || (Math.abs(mx-(dx+dw))<hit && Math.abs(my-(dy+dh))<hit)) canvasRef.current.style.cursor = 'nwse-resize';
+                else if ((Math.abs(mx-(dx+dw))<hit && Math.abs(my-dy)<hit) || (Math.abs(mx-dx)<hit && Math.abs(my-(dy+dh))<hit)) canvasRef.current.style.cursor = 'nesw-resize';
+                else if (mx > dx && mx < dx + dw && my > dy && my < dy + dh) canvasRef.current.style.cursor = 'move';
+                else canvasRef.current.style.cursor = 'default';
+            }
+        }
+    }
+
+    // 2. Drag Logic
+    if (dragMode === 'NONE' || !dragStart || !initialBox || !editingSegmentId || !onUpdateSegment) return;
+
+    const { x: mx, y: my } = getCanvasCoords(e);
+    const layout = getLayout();
+    if (!layout) return;
+
+    const deltaX = (mx - dragStart.x) / layout.scale / layout.imgWidth * 1000;
+    const deltaY = (my - dragStart.y) / layout.scale / layout.imgHeight * 1000;
+
+    const newBox = { ...initialBox };
+
+    switch (dragMode) {
+        case 'MOVE':
+            newBox.xmin = Math.max(0, Math.min(1000, initialBox.xmin + deltaX));
+            newBox.ymin = Math.max(0, Math.min(1000, initialBox.ymin + deltaY));
+            newBox.xmax = Math.max(0, Math.min(1000, initialBox.xmax + deltaX));
+            newBox.ymax = Math.max(0, Math.min(1000, initialBox.ymax + deltaY));
+            break;
+        case 'RESIZE_TL':
+            newBox.xmin = Math.min(newBox.xmax - 10, initialBox.xmin + deltaX);
+            newBox.ymin = Math.min(newBox.ymax - 10, initialBox.ymin + deltaY);
+            break;
+        case 'RESIZE_TR':
+            newBox.xmax = Math.max(newBox.xmin + 10, initialBox.xmax + deltaX);
+            newBox.ymin = Math.min(newBox.ymax - 10, initialBox.ymin + deltaY);
+            break;
+        case 'RESIZE_BL':
+            newBox.xmin = Math.min(newBox.xmax - 10, initialBox.xmin + deltaX);
+            newBox.ymax = Math.max(newBox.ymin + 10, initialBox.ymax + deltaY);
+            break;
+        case 'RESIZE_BR':
+            newBox.xmax = Math.max(newBox.xmin + 10, initialBox.xmax + deltaX);
+            newBox.ymax = Math.max(newBox.ymin + 10, initialBox.ymax + deltaY);
+            break;
+    }
+
+    // Clamp values 0-1000
+    const clampedBox = {
+        xmin: Math.max(0, Math.min(1000, newBox.xmin)),
+        ymin: Math.max(0, Math.min(1000, newBox.ymin)),
+        xmax: Math.max(0, Math.min(1000, newBox.xmax)),
+        ymax: Math.max(0, Math.min(1000, newBox.ymax))
+    };
+
+    onUpdateSegment(editingSegmentId, clampedBox);
+  };
+
+  const handleMouseUp = () => {
+    setDragMode('NONE');
+    setDragStart(null);
+    setInitialBox(null);
+  };
+
+
+  // --- AUDIO LOGIC (Unchanged mostly) ---
   const decodePCM = (base64: string, ctx: AudioContext): AudioBuffer => {
     const binaryString = window.atob(base64);
     const len = binaryString.length;
@@ -177,21 +332,10 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     for (let i = 0; i < len; i++) {
         bytes[i] = binaryString.charCodeAt(i);
     }
-    
-    // Gemini returns 16-bit PCM at 24kHz
     const dataInt16 = new Int16Array(bytes.buffer);
-    const numChannels = 1;
-    const sampleRate = 24000;
-    const frameCount = dataInt16.length / numChannels;
-    
-    const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+    const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
     const channelData = buffer.getChannelData(0);
-    
-    for (let i = 0; i < frameCount; i++) {
-      // Convert PCM Int16 to Float32 [-1.0, 1.0]
-      channelData[i] = dataInt16[i] / 32768.0;
-    }
-    
+    for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
     return buffer;
   };
 
@@ -200,26 +344,19 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
     const actx = audioContextRef.current;
-    if (actx.state === 'suspended') {
-      await actx.resume();
-    }
+    if (actx.state === 'suspended') await actx.resume();
 
-    // Setup Recording Stream if needed
+    // Setup Recording
     if (isRecording && canvasRef.current) {
       destinationRef.current = actx.createMediaStreamDestination();
-      const canvasStream = canvasRef.current.captureStream(30); // 30 FPS
+      const canvasStream = canvasRef.current.captureStream(30);
       const combinedStream = new MediaStream([
         ...canvasStream.getVideoTracks(),
         ...destinationRef.current.stream.getAudioTracks()
       ]);
-
       mediaRecorderRef.current = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
       recordedChunksRef.current = [];
-      
-      mediaRecorderRef.current.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
-      };
-
+      mediaRecorderRef.current.ondataavailable = (e) => { if (e.data.size > 0) recordedChunksRef.current.push(e.data); };
       mediaRecorderRef.current.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
         const url = URL.createObjectURL(blob);
@@ -229,64 +366,46 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         a.click();
         setAppState(AppState.READY);
       };
-
       mediaRecorderRef.current.start();
     }
 
     isPlayingRef.current = true;
-    currentSegmentIndexRef.current = -1; // Start before first
-    drawFrame(); // Start loop
+    currentSegmentIndexRef.current = -1;
+    drawFrame();
 
-    // Playback Logic
     for (let i = 0; i < segments.length; i++) {
         if (!isPlayingRef.current) break;
-
         const seg = segments[i];
         currentSegmentIndexRef.current = i;
         setActiveSegmentId(seg.id);
 
+        let audioDuration = 0;
+
         if (seg.audioBase64) {
             try {
-              // Decode the raw PCM data
               const buffer = decodePCM(seg.audioBase64, actx);
-              
+              audioDuration = buffer.duration;
               const source = actx.createBufferSource();
               source.buffer = buffer;
-              
-              // Route audio
               const mainOutput = actx.createGain();
               mainOutput.connect(actx.destination);
-              
-              if (isRecording && destinationRef.current) {
-                  mainOutput.connect(destinationRef.current);
-              }
-              
+              if (isRecording && destinationRef.current) mainOutput.connect(destinationRef.current);
               source.connect(mainOutput);
               source.start(0);
-
-              // Wait for audio to finish
-              await new Promise((resolve) => {
-                  source.onended = resolve;
-                  // Safety timeout
-                  setTimeout(resolve, (buffer.duration * 1000) + 500); 
-              });
             } catch (err) {
-              console.error("Error decoding or playing audio segment:", err);
-              // Fallback wait if audio fails
-              await new Promise(r => setTimeout(r, 1000));
+              console.error("Audio playback error", err);
             }
-        } else {
-            // If no audio (visual only), wait a default time
-            await new Promise(r => setTimeout(r, 2000));
         }
         
-        // Small pause between segments
-        await new Promise(r => setTimeout(r, 500));
+        // Wait for max(audio, custom_duration)
+        const waitTime = Math.max(audioDuration, seg.duration || 0) * 1000;
+        await new Promise(r => setTimeout(r, waitTime));
+        
+        // Small gap
+        await new Promise(r => setTimeout(r, 200));
     }
 
-    // Finish
     if (isRecording && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        // Wait a moment before cutting
         await new Promise(r => setTimeout(r, 1000));
         mediaRecorderRef.current.stop();
     } else {
@@ -296,52 +415,46 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     isPlayingRef.current = false;
     currentSegmentIndexRef.current = -1;
     setActiveSegmentId(null);
-    drawFrame(); // Final draw to clear or reset
+    drawFrame();
   };
 
   useEffect(() => {
-    if (appState === AppState.PLAYING) {
-        playSequence(false);
-    } else if (appState === AppState.RECORDING) {
-        playSequence(true);
-    } else {
-        isPlayingRef.current = false;
-    }
+    if (appState === AppState.PLAYING) playSequence(false);
+    else if (appState === AppState.RECORDING) playSequence(true);
+    else isPlayingRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appState]);
 
-  // Initial draw on mount
-  useEffect(() => {
-    drawFrame();
-  });
-
   return (
     <div className="flex flex-col items-center gap-4 w-full">
-      <div className="relative rounded-xl overflow-hidden shadow-2xl border border-slate-700 bg-slate-900">
+      <div className="relative rounded-xl overflow-hidden shadow-2xl border border-slate-700 bg-slate-900 select-none">
         <canvas 
           ref={canvasRef} 
           width={width} 
           height={height}
-          className="w-full h-auto max-h-[60vh] object-contain"
+          className="w-full h-auto max-h-[60vh] object-contain touch-none"
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
         />
         {appState === AppState.PLAYING && (
-          <div className="absolute top-4 right-4 bg-red-500/80 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse">
+          <div className="absolute top-4 right-4 bg-red-500/80 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse pointer-events-none">
             PREVIEWING
           </div>
         )}
         {appState === AppState.RECORDING && (
-          <div className="absolute top-4 right-4 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse flex items-center gap-2">
+          <div className="absolute top-4 right-4 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse flex items-center gap-2 pointer-events-none">
             <span className="block w-2 h-2 bg-white rounded-full"></span> REC
           </div>
         )}
         {editingSegmentId && (
-           <div className="absolute top-4 right-4 bg-cyan-600/90 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
-             EDITING MODE
+           <div className="absolute top-4 right-4 bg-cyan-600/90 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg pointer-events-none">
+             DRAG TO EDIT
            </div>
         )}
       </div>
       
-      {/* Active Segment Subtitle (Optional accessible view) */}
       <div className="h-12 text-center text-slate-300 font-medium text-lg min-h-[3rem] px-4">
         {activeSegmentId ? segments.find(s => s.id === activeSegmentId)?.text : "..."}
       </div>
