@@ -8,6 +8,7 @@ interface VideoCanvasProps {
   setAppState: (state: AppState) => void;
   width?: number;
   height?: number;
+  editingSegmentId?: string | null;
 }
 
 const VideoCanvas: React.FC<VideoCanvasProps> = ({ 
@@ -16,7 +17,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   appState, 
   setAppState,
   width = 600, 
-  height = 600 
+  height = 600,
+  editingSegmentId
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -43,6 +45,11 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     };
   }, [imageSrc]);
 
+  // Effect to redraw when editing state changes
+  useEffect(() => {
+    drawFrame();
+  }, [editingSegmentId, segments]);
+
   // Main Draw Loop
   const drawFrame = () => {
     const canvas = canvasRef.current;
@@ -61,6 +68,53 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     const y = (canvas.height / 2) - (img.height / 2) * scale;
     const w = img.width * scale;
     const h = img.height * scale;
+
+    // --- EDIT MODE RENDERING ---
+    if (editingSegmentId) {
+      // Draw full image
+      ctx.drawImage(img, x, y, w, h);
+      
+      // Overlay a semi-transparent dark layer to focus attention on the box
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(x, y, w, h);
+
+      const seg = segments.find(s => s.id === editingSegmentId);
+      if (seg) {
+        const sx = (seg.box.xmin / 1000) * img.width;
+        const sy = (seg.box.ymin / 1000) * img.height;
+        const sw = ((seg.box.xmax - seg.box.xmin) / 1000) * img.width;
+        const sh = ((seg.box.ymax - seg.box.ymin) / 1000) * img.height;
+
+        const dx = x + sx * scale;
+        const dy = y + sy * scale;
+        const dw = sw * scale;
+        const dh = sh * scale;
+
+        // Cut out the "hole" to show the clear image
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(dx, dy, dw, dh);
+        ctx.clip();
+        ctx.drawImage(img, x, y, w, h);
+        ctx.restore();
+
+        // Draw active edit border
+        ctx.strokeStyle = '#06b6d4'; // Cyan-500
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(dx, dy, dw, dh);
+        ctx.setLineDash([]);
+        
+        // Draw corner handles (visual only for now)
+        ctx.fillStyle = '#06b6d4';
+        const handleSize = 6;
+        ctx.fillRect(dx - handleSize/2, dy - handleSize/2, handleSize, handleSize); // TL
+        ctx.fillRect(dx + dw - handleSize/2, dy + dh - handleSize/2, handleSize, handleSize); // BR
+      }
+      return;
+    }
+
+    // --- NORMAL / PLAYBACK RENDERING ---
 
     // Draw the blurred base image (The "Hidden" state)
     ctx.filter = 'blur(15px) brightness(0.6)';
@@ -279,6 +333,11 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
           <div className="absolute top-4 right-4 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse flex items-center gap-2">
             <span className="block w-2 h-2 bg-white rounded-full"></span> REC
           </div>
+        )}
+        {editingSegmentId && (
+           <div className="absolute top-4 right-4 bg-cyan-600/90 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg">
+             EDITING MODE
+           </div>
         )}
       </div>
       

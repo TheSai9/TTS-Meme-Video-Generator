@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { AppState, MemeSegment } from './types';
+import { AppState, MemeSegment, BoundingBox } from './types';
 import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiService';
 import VideoCanvas from './components/VideoCanvas';
 
@@ -8,6 +8,7 @@ const App: React.FC = () => {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [segments, setSegments] = useState<MemeSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -57,6 +58,28 @@ const App: React.FC = () => {
     setImageSrc(null);
     setSegments([]);
     setError(null);
+    setEditingSegmentId(null);
+  };
+
+  const moveSegment = (index: number, direction: 'up' | 'down') => {
+    if (appState !== AppState.READY) return;
+    const newSegments = [...segments];
+    if (direction === 'up' && index > 0) {
+      [newSegments[index], newSegments[index - 1]] = [newSegments[index - 1], newSegments[index]];
+    } else if (direction === 'down' && index < newSegments.length - 1) {
+      [newSegments[index], newSegments[index + 1]] = [newSegments[index + 1], newSegments[index]];
+    }
+    setSegments(newSegments);
+  };
+
+  const updateSegmentBox = (id: string, partialBox: Partial<BoundingBox>) => {
+    setSegments(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      return { 
+        ...s, 
+        box: { ...s.box, ...partialBox } 
+      };
+    }));
   };
 
   return (
@@ -129,12 +152,13 @@ const App: React.FC = () => {
                 setAppState={setAppState} 
                 width={800}
                 height={600}
+                editingSegmentId={editingSegmentId}
               />
               
               {/* Controls */}
               <div className="flex gap-4 mt-6">
                 <button
-                  disabled={appState !== AppState.READY}
+                  disabled={appState !== AppState.READY || editingSegmentId !== null}
                   onClick={() => setAppState(AppState.PLAYING)}
                   className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold flex items-center gap-2 transition-colors"
                 >
@@ -145,7 +169,7 @@ const App: React.FC = () => {
                 </button>
 
                 <button
-                  disabled={appState !== AppState.READY}
+                  disabled={appState !== AppState.READY || editingSegmentId !== null}
                   onClick={() => setAppState(AppState.RECORDING)}
                   className="px-6 py-3 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold flex items-center gap-2 transition-colors shadow-lg shadow-red-900/20"
                 >
@@ -171,19 +195,95 @@ const App: React.FC = () => {
               </h3>
               <div className="space-y-3">
                 {segments.map((seg, idx) => (
-                  <div key={seg.id} className="bg-slate-800 p-3 rounded border border-slate-700 hover:border-indigo-500/50 transition-colors">
+                  <div key={seg.id} className={`p-3 rounded border transition-colors ${editingSegmentId === seg.id ? 'bg-slate-800/80 border-cyan-500 ring-1 ring-cyan-500/50' : 'bg-slate-800 border-slate-700 hover:border-indigo-500/50'}`}>
+                    
+                    {/* Header: Order & Actions */}
                     <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-mono text-cyan-400">Step {idx + 1}</span>
+                      <span className="text-xs font-mono text-slate-400">#{idx + 1}</span>
+                      
+                      <div className="flex gap-1">
+                        <button 
+                          onClick={() => moveSegment(idx, 'up')} 
+                          disabled={idx === 0 || editingSegmentId !== null}
+                          className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                          title="Move Up"
+                        >
+                          ↑
+                        </button>
+                        <button 
+                          onClick={() => moveSegment(idx, 'down')} 
+                          disabled={idx === segments.length - 1 || editingSegmentId !== null}
+                          className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white disabled:opacity-30"
+                          title="Move Down"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          onClick={() => setEditingSegmentId(editingSegmentId === seg.id ? null : seg.id)}
+                          className={`ml-2 px-2 py-0.5 text-xs font-bold rounded ${editingSegmentId === seg.id ? 'bg-cyan-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                        >
+                          {editingSegmentId === seg.id ? 'Done' : 'Edit'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="text-sm text-slate-200 line-clamp-2 mb-2">{seg.text}</p>
+                    
+                    {/* Status Badges */}
+                    <div className="flex gap-2 mb-2">
                       {seg.audioBase64 ? (
-                        <span className="text-xs bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded">Audio Ready</span>
+                        <span className="text-[10px] bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded">Audio Ready</span>
                       ) : (
-                        <span className="text-xs bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded">Silent</span>
+                        <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-1.5 py-0.5 rounded">Silent</span>
                       )}
                     </div>
-                    <p className="text-sm text-slate-200 line-clamp-3">{seg.text}</p>
-                    <div className="mt-2 text-[10px] text-slate-500 font-mono">
-                      Box: [{Math.round(seg.box.ymin)}, {Math.round(seg.box.xmin)}]
-                    </div>
+
+                    {/* Editor Controls */}
+                    {editingSegmentId === seg.id && (
+                      <div className="mt-3 pt-3 border-t border-slate-700 space-y-3">
+                        <div className="text-[10px] uppercase font-bold text-cyan-400 mb-1">Adjust Reveal Area</div>
+                        
+                        <div className="grid grid-cols-2 gap-2">
+                            <div>
+                                <label className="text-[10px] text-slate-500 block mb-1">Left (X)</label>
+                                <input 
+                                    type="range" min="0" max="1000" 
+                                    value={seg.box.xmin}
+                                    onChange={(e) => updateSegmentBox(seg.id, { xmin: Number(e.target.value) })}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-slate-500 block mb-1">Top (Y)</label>
+                                <input 
+                                    type="range" min="0" max="1000" 
+                                    value={seg.box.ymin}
+                                    onChange={(e) => updateSegmentBox(seg.id, { ymin: Number(e.target.value) })}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-slate-500 block mb-1">Width (Right)</label>
+                                <input 
+                                    type="range" min="0" max="1000" 
+                                    value={seg.box.xmax}
+                                    onChange={(e) => updateSegmentBox(seg.id, { xmax: Number(e.target.value) })}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-slate-500 block mb-1">Height (Bottom)</label>
+                                <input 
+                                    type="range" min="0" max="1000" 
+                                    value={seg.box.ymax}
+                                    onChange={(e) => updateSegmentBox(seg.id, { ymax: Number(e.target.value) })}
+                                    className="w-full h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                                />
+                            </div>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                 ))}
               </div>
