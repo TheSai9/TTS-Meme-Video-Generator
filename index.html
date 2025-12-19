@@ -3,11 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MemeReveal - Dopamine Edition</title>
+    <title>MemeReveal - Sketchbook Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Bangers&family=DM+Sans:ital,opsz,wght@0,9..40,400..800;1,9..40,400..800&family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@700&family=Patrick+Hand&display=swap" rel="stylesheet">
     <script type="importmap">
     {
       "imports": {
@@ -21,101 +21,62 @@
     </script>
     <style>
       :root {
-        --bg-void: #0D0D1A;
-        --color-magenta: #FF3AF2;
-        --color-cyan: #00F5D4;
-        --color-yellow: #FFE600;
-        --color-orange: #FF6B35;
-        --color-purple: #7B2FFF;
+        --bg-paper: #fdfbf7;
+        --color-pencil: #2d2d2d;
+        --color-muted: #e5e0d8;
+        --color-accent: #ff4d4d; /* Correction Red */
+        --color-blue: #2d5da1;   /* Ballpoint Blue */
+        --color-yellow: #fff9c4; /* Post-it Yellow */
       }
 
       body {
-        font-family: 'DM Sans', sans-serif;
-        background-color: var(--bg-void);
-        color: #FFFFFF;
+        font-family: 'Patrick Hand', cursive;
+        background-color: var(--bg-paper);
+        color: var(--color-pencil);
+        background-image: radial-gradient(#e5e0d8 1px, transparent 1px);
+        background-size: 24px 24px;
         overflow-x: hidden;
       }
 
       h1, h2, h3, .font-heading {
-        font-family: 'Outfit', sans-serif;
+        font-family: 'Kalam', cursive;
       }
 
-      .font-display {
-        font-family: 'Bangers', system-ui;
-        letter-spacing: 0.05em;
+      /* Wobbly Border Utilities */
+      .border-wobbly-sm {
+        border-radius: 2px 8px 3px 6px;
+      }
+      .border-wobbly-md {
+        border-radius: 5px 25px 8px 20px;
+      }
+      .border-wobbly-lg {
+        border-radius: 15px 225px 20px 200px / 225px 15px 200px 15px;
+      }
+      .border-wobbly-oval {
+        border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
       }
 
-      /* PATTERNS */
-      .pattern-dots {
-        background-image: radial-gradient(circle, #FF3AF2 2px, transparent 2px);
-        background-size: 40px 40px;
-        opacity: 0.15;
+      /* Shadows */
+      .shadow-sketch {
+        box-shadow: 4px 4px 0px 0px #2d2d2d;
+      }
+      .shadow-sketch-lg {
+        box-shadow: 8px 8px 0px 0px #2d2d2d;
+      }
+      .shadow-sketch-sm {
+        box-shadow: 2px 2px 0px 0px #2d2d2d;
       }
       
-      .pattern-checker {
-        background-image: conic-gradient(from 90deg at 1px 1px, transparent 90deg, rgba(0, 245, 212, 0.1) 0);
-        background-size: 60px 60px;
-      }
-
-      /* SHADOWS */
-      .shadow-hard-magenta {
-        box-shadow: 6px 6px 0px #FF3AF2;
-      }
-      .shadow-hard-cyan {
-        box-shadow: 6px 6px 0px #00F5D4;
-      }
-      .shadow-hard-yellow {
-        box-shadow: 6px 6px 0px #FFE600;
-      }
-      
-      .shadow-stack-sm {
-        box-shadow: 4px 4px 0px #7B2FFF, 8px 8px 0px #FF3AF2;
-      }
-
-      .shadow-stack-lg {
-        box-shadow: 6px 6px 0px #00F5D4, 12px 12px 0px #FFE600;
-      }
-
-      .text-shadow-neon {
-        text-shadow: 2px 2px 0px #7B2FFF, 4px 4px 0px #FF3AF2;
-      }
-
-      /* ANIMATIONS */
-      @keyframes float {
-        0%, 100% { transform: translateY(0) rotate(0deg); }
-        50% { transform: translateY(-15px) rotate(2deg); }
-      }
-      .animate-float {
-        animation: float 6s ease-in-out infinite;
-      }
-
-      @keyframes wiggle {
-        0%, 100% { transform: rotate(-3deg); }
-        50% { transform: rotate(3deg); }
-      }
-      .animate-wiggle {
-        animation: wiggle 1s ease-in-out infinite;
-      }
-      
-      @keyframes spin-slow {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
-      .animate-spin-slow {
-        animation: spin-slow 20s linear infinite;
-      }
-      
-      @keyframes pulse-glow {
-        0%, 100% { box-shadow: 0 0 20px rgba(255, 58, 242, 0.5); }
-        50% { box-shadow: 0 0 40px rgba(255, 58, 242, 0.8), 0 0 60px rgba(0, 245, 212, 0.5); }
-      }
-      .animate-pulse-glow {
-        animation: pulse-glow 2s ease-in-out infinite;
-      }
-
-      /* UTILS */
+      /* Utilities */
       .scrollbar-hide::-webkit-scrollbar {
           display: none;
+      }
+      
+      /* Tape Effect */
+      .tape-gray {
+        background-color: rgba(45, 45, 45, 0.1);
+        box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+        backdrop-filter: blur(2px);
       }
     </style>
   <link rel="stylesheet" href="/index.css">

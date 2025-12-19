@@ -99,8 +99,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
     if (!canvas || !ctx || !img) return;
 
-    // Clear
-    ctx.fillStyle = '#1e293b';
+    // Clear background (Warm paper color)
+    ctx.fillStyle = '#fdfbf7';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const layout = getLayout();
@@ -110,7 +110,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     // --- EDIT MODE RENDERING ---
     if (editingSegmentId) {
       ctx.drawImage(img, x, y, w, h);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'; // White fade
       ctx.fillRect(x, y, w, h);
 
       const seg = segments.find(s => s.id === editingSegmentId);
@@ -132,28 +132,27 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         ctx.drawImage(img, x, y, w, h);
         ctx.restore();
 
-        // Maximalist Edit Box
-        ctx.strokeStyle = '#00F5D4';
-        ctx.lineWidth = 4;
-        ctx.setLineDash([8, 8]);
+        // Correction Marker Style Edit Box
+        ctx.strokeStyle = '#ff4d4d';
+        ctx.lineWidth = 3;
+        // Make it look hand-drawn with slight irregularities (simulated) by line joins
+        ctx.lineJoin = 'round';
         ctx.strokeRect(dx, dy, dw, dh);
-        ctx.setLineDash([]);
         
-        ctx.fillStyle = '#FF3AF2';
-        const hs = 12;
+        ctx.fillStyle = '#ff4d4d';
+        const hs = 10;
         const handles = [{ x: dx, y: dy }, { x: dx + dw, y: dy }, { x: dx, y: dy + dh }, { x: dx + dw, y: dy + dh }];
         handles.forEach(h => {
-            ctx.fillRect(h.x - hs/2, h.y - hs/2, hs, hs);
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(h.x - hs/2, h.y - hs/2, hs, hs);
+            ctx.beginPath();
+            ctx.arc(h.x, h.y, hs/2, 0, Math.PI * 2);
+            ctx.fill();
         });
       }
       return;
     }
 
     // --- PLAYBACK RENDERING ---
-    ctx.filter = 'blur(15px) brightness(0.6)';
+    ctx.filter = 'blur(15px) grayscale(50%) opacity(0.8)';
     ctx.drawImage(img, x, y, w, h);
     ctx.filter = 'none';
 
@@ -183,12 +182,16 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
         // Highlight only if NOT recording
         if (index === currentIndex && currentState !== AppState.RECORDING) {
-          ctx.strokeStyle = '#FFE600';
-          ctx.lineWidth = 6;
-          ctx.shadowColor = '#FF3AF2';
-          ctx.shadowBlur = 20;
-          ctx.strokeRect(dx - 3, dy - 3, dw + 6, dh + 6);
-          ctx.shadowBlur = 0;
+          // Highlighter Effect
+          ctx.strokeStyle = 'rgba(255, 235, 59, 0.6)'; // Transparent yellow
+          ctx.lineWidth = 12;
+          ctx.lineCap = 'round';
+          ctx.strokeRect(dx - 6, dy - 6, dw + 12, dh + 12);
+          
+          // Pencil Outline
+          ctx.strokeStyle = '#2d2d2d';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(dx, dy, dw, dh);
         }
       }
     });
@@ -510,36 +513,38 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
   return (
     <div className="flex flex-col items-center gap-6 w-full">
-      <div className="relative rounded-3xl overflow-hidden shadow-hard-cyan border-8 border-[#FF3AF2] bg-[#0D0D1A] select-none p-2 rotate-1 hover:rotate-0 transition-transform duration-500">
+      {/* Taped Photo Container */}
+      <div className="relative p-2 bg-white border-[3px] border-[#2d2d2d] border-wobbly-sm shadow-sketch-lg rotate-1 transition-transform duration-500 hover:rotate-0">
+        <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 w-32 h-8 tape-gray rotate-1 z-10"></div>
         <canvas 
           ref={canvasRef} 
           width={canvasDims.width} 
           height={canvasDims.height}
-          className="w-full h-auto max-h-[60vh] object-contain touch-none rounded-2xl"
+          className="w-full h-auto max-h-[60vh] object-contain touch-none border-2 border-[#2d2d2d] border-dashed"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         />
         {appState === AppState.PLAYING && (
-          <div className="absolute top-6 right-6 bg-[#FF3AF2] border-4 border-white text-white px-4 py-2 rounded-full text-sm font-black animate-pulse pointer-events-none shadow-hard-yellow uppercase">
-            Previewing
+          <div className="absolute top-6 right-6 bg-[#fff9c4] border-2 border-[#2d2d2d] text-[#2d2d2d] px-4 py-2 text-sm font-bold animate-pulse pointer-events-none shadow-sm transform -rotate-2">
+            PREVIEWING
           </div>
         )}
         {appState === AppState.RECORDING && (
-          <div className="absolute top-6 right-6 bg-[#FF6B35] border-4 border-white text-white px-4 py-2 rounded-full text-sm font-black animate-pulse flex items-center gap-2 pointer-events-none shadow-hard-magenta uppercase">
-            <span className="block w-3 h-3 bg-white rounded-full"></span> REC
+          <div className="absolute top-6 right-6 bg-[#ff4d4d] border-2 border-[#2d2d2d] text-white px-4 py-2 text-sm font-bold animate-pulse flex items-center gap-2 pointer-events-none shadow-sm transform rotate-1">
+            <span className="block w-3 h-3 bg-white rounded-full border border-[#2d2d2d]"></span> REC
           </div>
         )}
         {editingSegmentId && (
-           <div className="absolute top-6 right-6 bg-[#00F5D4] text-black border-4 border-black px-4 py-2 rounded-full text-sm font-black shadow-hard-magenta pointer-events-none uppercase">
+           <div className="absolute top-6 right-6 bg-[#2d5da1] text-white border-2 border-[#2d2d2d] px-4 py-2 text-sm font-bold shadow-sm pointer-events-none transform -rotate-1">
              Drag to Edit
            </div>
         )}
       </div>
       
-      <div className="h-16 flex items-center justify-center w-full max-w-2xl bg-black/40 border-4 border-[#7B2FFF] rounded-2xl px-6">
-        <p className="text-center text-[#FFE600] font-heading font-bold text-xl min-h-[1.5rem] uppercase tracking-wide">
+      <div className="h-16 flex items-center justify-center w-full max-w-2xl">
+        <p className="text-center text-[#2d2d2d] font-hand font-bold text-2xl min-h-[1.5rem]">
             {activeSegmentId ? `"${segments.find(s => s.id === activeSegmentId)?.text}"` : "..."}
         </p>
       </div>

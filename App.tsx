@@ -4,58 +4,48 @@ import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiSer
 import { analyzeLocalImage, performOCROnBox, calculateSegmentDuration, isTextCoherent } from './services/localAnalysisService';
 import VideoCanvas from './components/VideoCanvas';
 
-// --- MAXIMALIST CONSTANTS ---
-const ACCENT_COLORS = [
-  '#FF3AF2', // Magenta
-  '#00F5D4', // Cyan
-  '#FFE600', // Yellow
-  '#FF6B35', // Orange
-  '#7B2FFF', // Purple
-];
+// --- HAND-DRAWN ICONS & DECORATIONS ---
 
-const DECORATIVE_EMOJIS = ['⚡', '🔥', '🚀', '✨', '👀', '💀', '👽', '👾'];
+const ScribbleStar = () => (
+  <svg viewBox="0 0 100 100" className="w-12 h-12 text-[#ff4d4d] opacity-80 animate-wiggle" style={{ filter: 'drop-shadow(2px 2px 0px rgba(0,0,0,0.1))' }}>
+    <path fill="currentColor" d="M50 0 L61 35 L98 35 L68 57 L79 91 L50 70 L21 91 L32 57 L2 35 L39 35 Z" stroke="#2d2d2d" strokeWidth="2" strokeLinejoin="round" />
+  </svg>
+);
 
-// --- SUBCOMPONENTS ---
+const ScribbleArrow = () => (
+  <svg viewBox="0 0 100 60" className="w-24 h-16 text-[#2d2d2d] absolute -right-4 top-1/2 transform -translate-y-1/2 rotate-12 hidden md:block">
+    <path d="M10 30 C 30 10, 70 10, 90 30" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="5,5" />
+    <path d="M90 30 L 80 20 M 90 30 L 80 40" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+  </svg>
+);
 
-const FloatingShape = ({ index }: { index: number }) => {
-  // Deterministic "randomness" based on index
-  const top = `${(index * 17) % 90}%`;
-  const left = `${(index * 23) % 90}%`;
-  const size = `${(index % 3) * 20 + 40}px`; // 40, 60, 80px
-  const delay = `${index * 1.5}s`;
-  const emoji = DECORATIVE_EMOJIS[index % DECORATIVE_EMOJIS.length];
-  const rotation = index % 2 === 0 ? 'animate-float' : 'animate-wiggle';
-
-  return (
-    <div 
-      className={`absolute select-none pointer-events-none z-0 text-6xl opacity-40 mix-blend-screen ${rotation}`}
-      style={{ top, left, animationDelay: delay, fontSize: size }}
-      aria-hidden="true"
-    >
-      {emoji}
-    </div>
-  );
-};
+const Tape = ({ className = "" }: { className?: string }) => (
+  <div className={`absolute h-8 w-24 tape-gray transform ${className}`} style={{ zIndex: 10 }}></div>
+);
 
 const Header = () => (
-  <header className="relative w-full max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center mb-16 pt-8 px-4 z-50">
+  <header className="relative w-full max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center mb-16 pt-12 px-6 z-10">
     <div className="relative group cursor-default">
-      <div className="absolute -inset-2 bg-gradient-to-r from-[#FF3AF2] via-[#00F5D4] to-[#FFE600] rounded-lg blur opacity-75 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-tilt"></div>
-      <h1 className="relative font-display text-7xl md:text-8xl text-white transform -rotate-2 group-hover:rotate-0 transition-transform duration-300 text-shadow-neon">
-        MEME<span className="text-[#FFE600]">REVEAL</span>
+      <h1 className="relative font-heading text-6xl md:text-7xl text-[#2d2d2d] transform -rotate-2 group-hover:rotate-0 transition-transform duration-300">
+        Meme<span className="text-[#ff4d4d] underline decoration-wavy decoration-2 underline-offset-4">Reveal</span>
       </h1>
-      <div className="absolute -bottom-4 right-0 rotate-3 bg-[#FF6B35] text-black font-bold px-2 py-0.5 text-xs uppercase tracking-widest border-2 border-white shadow-hard-cyan">
-        AI Powered
+      <div className="absolute -top-6 -right-8 transform rotate-12">
+        <span className="bg-[#ff4d4d] text-white font-bold px-3 py-1 text-sm border-wobbly-sm shadow-sketch-sm inline-block transform -rotate-3">
+          AI Powered!
+        </span>
       </div>
     </div>
     
-    <div className="mt-8 md:mt-0 flex flex-col items-end">
-      <div className="bg-[#2D1B4E]/80 backdrop-blur-sm border-4 border-[#00F5D4] p-4 rounded-xl shadow-stack-sm transform rotate-1 hover:rotate-2 transition-all">
-        <p className="font-heading font-black text-[#FF3AF2] uppercase tracking-tighter text-lg leading-none">
-          Dopamine Level
+    <div className="mt-8 md:mt-0 flex flex-col items-center md:items-end">
+      <div className="bg-white p-4 border-[3px] border-[#2d2d2d] border-wobbly-md shadow-sketch transform rotate-1 relative">
+        <Tape className="-top-3 left-10 -rotate-2" />
+        <p className="font-heading font-bold text-[#2d2d2d] text-xl leading-none">
+          Sketchbook Mode
         </p>
-        <div className="w-full bg-black/50 h-3 mt-2 rounded-full overflow-hidden border border-white/20">
-          <div className="h-full bg-gradient-to-r from-[#FF3AF2] to-[#FFE600] w-[90%] animate-pulse"></div>
+        <div className="flex gap-1 mt-2">
+          <div className="w-3 h-3 rounded-full bg-[#ff4d4d] border border-[#2d2d2d]"></div>
+          <div className="w-3 h-3 rounded-full bg-[#2d5da1] border border-[#2d2d2d]"></div>
+          <div className="w-3 h-3 rounded-full bg-[#fff9c4] border border-[#2d2d2d]"></div>
         </div>
       </div>
     </div>
@@ -156,7 +146,6 @@ const App: React.FC = () => {
     setEditingSegmentId(null);
   };
 
-  // ... (Keeping logic functions same: moveSegment, updateSegmentBox, etc.) ...
   const moveSegment = (index: number, direction: 'up' | 'down') => {
     if (appState !== AppState.READY) return;
     const newSegments = [...segments];
@@ -230,80 +219,85 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen relative overflow-x-hidden">
-      {/* BACKGROUND LAYERS */}
-      <div className="fixed inset-0 pattern-dots pointer-events-none z-0"></div>
-      <div className="fixed inset-0 pattern-checker pointer-events-none z-0 opacity-20"></div>
-      
-      {/* FLOATING DECORATIONS */}
-      {Array.from({ length: 8 }).map((_, i) => <FloatingShape key={i} index={i} />)}
+      {/* Decorative Background Elements */}
+      <div className="fixed top-20 left-10 transform -rotate-12 opacity-20 hidden md:block select-none pointer-events-none">
+        <div className="w-32 h-32 border-[3px] border-[#2d2d2d] rounded-full"></div>
+      </div>
+      <div className="fixed bottom-20 right-10 transform rotate-12 opacity-20 hidden md:block select-none pointer-events-none">
+        <div className="w-40 h-40 border-[3px] border-[#2d2d2d] border-dashed rounded-full"></div>
+      </div>
 
       <Header />
 
-      <main className="relative z-10 w-full max-w-7xl mx-auto px-4 pb-20 flex flex-col items-center gap-12">
+      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 pb-20 flex flex-col items-center gap-12">
         
         {error && (
-          <div className="w-full max-w-2xl bg-[#FF6B35] border-4 border-white text-black font-bold p-6 rounded-2xl shadow-stack-lg rotate-1 animate-wiggle">
-            ERROR: {error}
+          <div className="w-full max-w-2xl bg-[#ff4d4d] border-[3px] border-[#2d2d2d] text-white font-bold p-6 border-wobbly-md shadow-sketch rotate-1">
+            <div className="flex items-center gap-2">
+                <span className="text-2xl">⚠️</span>
+                <span>ERROR: {error}</span>
+            </div>
           </div>
         )}
 
         {/* State: IDLE - Upload Area */}
         {appState === AppState.IDLE && (
-          <div className="flex flex-col gap-8 w-full max-w-2xl">
+          <div className="flex flex-col gap-10 w-full max-w-2xl">
             
-            {/* Mode Toggle - Maximalist */}
-            <div className="flex items-center justify-between bg-[#2D1B4E]/90 backdrop-blur-md p-6 rounded-3xl border-4 border-[#00F5D4] shadow-hard-magenta transform -rotate-1">
+            {/* Mode Toggle - Sketchy */}
+            <div className="flex items-center justify-between bg-white p-6 border-wobbly-md border-[3px] border-[#2d2d2d] shadow-sketch transform -rotate-1 relative">
+                <Tape className="-top-4 right-20 rotate-2" />
                 <div>
-                    <h3 className="font-display text-3xl text-white tracking-wide">
-                        AI <span className="text-[#FFE600]">SUPERCHARGE</span>
+                    <h3 className="font-heading text-3xl text-[#2d2d2d]">
+                        AI <span className="text-[#ff4d4d] underline decoration-wavy">Automation</span>
                     </h3>
-                    <p className="font-mono text-sm text-[#00F5D4] mt-1">Vision + TTS Analysis</p>
+                    <p className="text-sm text-[#2d2d2d]/70">Vision + TTS Analysis</p>
                 </div>
                 <button 
                     onClick={() => setUseAI(!useAI)}
-                    className={`relative w-20 h-10 rounded-full transition-colors border-4 ${useAI ? 'bg-[#FF3AF2] border-[#FFE600]' : 'bg-[#2D1B4E] border-[#7B2FFF]'}`}
+                    className={`relative w-20 h-10 rounded-full transition-colors border-[3px] border-[#2d2d2d] ${useAI ? 'bg-[#ff4d4d]' : 'bg-[#e5e0d8]'}`}
                 >
-                    <span className={`absolute top-0 left-0 bg-white w-8 h-8 rounded-full border-2 border-black transition-transform transform ${useAI ? 'translate-x-10' : 'translate-x-0'} shadow-sm`} />
+                    <span className={`absolute top-0.5 left-0.5 bg-white w-8 h-8 rounded-full border-2 border-[#2d2d2d] transition-transform transform ${useAI ? 'translate-x-10' : 'translate-x-0'}`} />
                 </button>
             </div>
 
             {/* Manual Mode Voices */}
             {!useAI && (
-              <div className="bg-[#2D1B4E] p-6 rounded-3xl border-4 border-[#FFE600] shadow-hard-cyan rotate-1">
-                  <label className="font-heading font-black text-xl text-white block mb-2 uppercase">Narrator Voice</label>
+              <div className="bg-[#fff9c4] p-6 border-wobbly-md border-[3px] border-[#2d2d2d] shadow-sketch rotate-1">
+                  <label className="font-heading font-bold text-2xl text-[#2d2d2d] block mb-2">Narrator Voice</label>
                   <select 
                     value={selectedVoiceName}
                     onChange={(e) => setSelectedVoiceName(e.target.value)}
-                    className="w-full bg-black/50 text-white font-bold p-4 rounded-xl border-4 border-[#FF3AF2] focus:outline-none focus:ring-4 focus:ring-[#00F5D4] focus:ring-offset-2 focus:ring-offset-[#2D1B4E]"
+                    className="w-full bg-white text-[#2d2d2d] font-bold p-3 border-wobbly-sm border-2 border-[#2d2d2d] focus:outline-none focus:border-[#2d5da1] focus:ring-2 focus:ring-[#2d5da1]/20"
                   >
                     {voices.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
                   </select>
               </div>
             )}
 
-            {/* Upload Zone - Maximalist */}
-            <div className="relative group cursor-pointer perspective-1000">
-                <div className="absolute inset-0 bg-gradient-to-r from-[#FF3AF2] to-[#00F5D4] rounded-3xl blur opacity-25 group-hover:opacity-60 transition duration-500 animate-pulse"></div>
-                <div className="relative w-full h-80 bg-[#0D0D1A] border-8 border-dashed border-[#FF3AF2] group-hover:border-[#FFE600] rounded-3xl flex flex-col items-center justify-center transition-all duration-300 transform group-hover:scale-[1.02] group-hover:rotate-1">
+            {/* Upload Zone - Sketchbook Page */}
+            <div className="relative group cursor-pointer w-full">
+                <ScribbleArrow />
+                <div className="relative w-full h-80 bg-white border-[4px] border-dashed border-[#2d2d2d] border-wobbly-md flex flex-col items-center justify-center transition-all duration-300 transform group-hover:scale-[1.01] group-hover:rotate-1 group-hover:shadow-sketch group-active:scale-[0.99]">
                   <input 
                     type="file" 
                     accept="image/*" 
                     onChange={handleFileUpload} 
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"
                   />
-                  <div className="w-24 h-24 bg-[#7B2FFF] rounded-full flex items-center justify-center mb-6 border-4 border-[#00F5D4] shadow-hard-yellow group-hover:animate-bounce">
-                    <span className="text-5xl">📂</span>
+                  <div className="w-20 h-20 bg-[#e5e0d8] rounded-full flex items-center justify-center mb-4 border-[3px] border-[#2d2d2d]">
+                    <span className="text-4xl">📂</span>
                   </div>
-                  <h3 className="font-display text-4xl text-white uppercase tracking-wider text-shadow-neon">
+                  <h3 className="font-heading text-4xl text-[#2d2d2d]">
                     Drop Meme Here
                   </h3>
-                  <p className="text-[#00F5D4] font-bold mt-2 font-mono">JPG / PNG / WEBP</p>
+                  <p className="text-[#2d2d2d]/60 font-bold mt-2">JPG / PNG / WEBP</p>
                 </div>
             </div>
 
             {!useAI && (
-               <div className="text-center font-bold text-[#FF6B35] bg-[#2D1B4E] p-3 rounded-xl border-2 border-[#FF6B35] border-dashed">
-                   MANUAL MODE ACTIVE // LOCAL ONLY
+               <div className="text-center font-bold text-[#ff4d4d] transform rotate-1">
+                   ( Manual Mode Active — Local Only )
                </div>
             )}
           </div>
@@ -311,27 +305,29 @@ const App: React.FC = () => {
 
         {/* State: LOADING */}
         {(appState === AppState.ANALYZING || appState === AppState.GENERATING_AUDIO) && (
-          <div className="flex flex-col items-center justify-center py-20">
-            <div className="relative w-32 h-32 mb-8">
-              <div className="absolute inset-0 border-8 border-[#2D1B4E] rounded-full"></div>
-              <div className="absolute inset-0 border-8 border-t-[#FF3AF2] border-r-[#00F5D4] border-b-[#FFE600] border-l-[#FF6B35] rounded-full animate-spin"></div>
+          <div className="flex flex-col items-center justify-center py-20 relative">
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                 <ScribbleStar />
             </div>
-            <h3 className="font-display text-6xl text-white text-shadow-neon animate-pulse">
-              {appState === AppState.ANALYZING ? 'ANALYZING...' : 'COOKING AUDIO...'}
+            <div className="relative w-32 h-32 mb-8 animate-bounce">
+              <span className="text-8xl">✏️</span>
+            </div>
+            <h3 className="font-heading text-5xl text-[#2d2d2d] animate-pulse">
+              {appState === AppState.ANALYZING ? 'Sketching Layout...' : 'Writing Script...'}
             </h3>
-            <p className="text-[#00F5D4] font-mono mt-4 text-xl">
-               DO NOT RESIST THE PROCESS
+            <p className="text-[#2d2d2d]/60 font-bold mt-4 text-xl transform -rotate-1">
+               Hold on tight!
             </p>
           </div>
         )}
 
         {/* State: EDITOR / PLAYER */}
         {(appState === AppState.READY || appState === AppState.PLAYING || appState === AppState.RECORDING) && imageSrc && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 w-full">
             
             {/* Left: Canvas (8 cols) */}
             <div className="lg:col-span-8 flex flex-col items-center">
-              <div className="relative z-20 transform transition-transform duration-500 hover:scale-[1.01]">
+              <div className="relative z-20">
                  <VideoCanvas 
                     imageSrc={imageSrc} 
                     segments={segments} 
@@ -346,11 +342,11 @@ const App: React.FC = () => {
               </div>
 
               {/* Controls Bar */}
-              <div className="flex flex-wrap gap-4 mt-8 justify-center w-full">
+              <div className="flex flex-wrap gap-6 mt-10 justify-center w-full">
                 <button
                   disabled={appState !== AppState.READY || editingSegmentId !== null}
                   onClick={() => setAppState(AppState.PLAYING)}
-                  className="px-8 py-4 bg-gradient-to-r from-[#00F5D4] to-[#7B2FFF] border-4 border-white text-black font-black uppercase text-xl rounded-full shadow-stack-sm hover:shadow-stack-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-8 py-3 bg-white border-[3px] border-[#2d2d2d] text-[#2d2d2d] font-bold text-2xl border-wobbly-oval shadow-sketch hover:bg-[#2d5da1] hover:text-white hover:shadow-sketch-sm hover:translate-x-[2px] hover:translate-y-[2px] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   <span>▶</span> Preview
                 </button>
@@ -358,14 +354,14 @@ const App: React.FC = () => {
                 <button
                   disabled={appState !== AppState.READY || editingSegmentId !== null}
                   onClick={() => setAppState(AppState.RECORDING)}
-                  className="px-8 py-4 bg-[#FF3AF2] border-4 border-[#FFE600] text-white font-black uppercase text-xl rounded-full shadow-hard-yellow hover:shadow-stack-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 animate-pulse-glow"
+                  className="px-8 py-3 bg-white border-[3px] border-[#2d2d2d] text-[#ff4d4d] font-bold text-2xl border-wobbly-oval shadow-sketch hover:bg-[#ff4d4d] hover:text-white hover:shadow-sketch-sm hover:translate-x-[2px] hover:translate-y-[2px] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   <span>🔴</span> Export Video
                 </button>
 
                 <button 
                   onClick={handleReset}
-                  className="px-6 py-4 bg-[#2D1B4E] border-4 border-[#FF6B35] text-[#FF6B35] font-bold uppercase rounded-full hover:bg-[#FF6B35] hover:text-black transition-colors"
+                  className="px-6 py-3 bg-[#e5e0d8] border-[3px] border-[#2d2d2d] text-[#2d2d2d] font-bold border-wobbly-oval hover:bg-[#2d2d2d] hover:text-white transition-colors"
                 >
                   Reset
                 </button>
@@ -374,92 +370,89 @@ const App: React.FC = () => {
 
             {/* Right: Segment List (4 cols) */}
             <div className="lg:col-span-4 flex flex-col h-[700px]">
-              <div className="flex justify-between items-center mb-6 bg-[#2D1B4E] p-4 rounded-xl border-4 border-[#7B2FFF] shadow-hard-magenta">
-                <h3 className="font-display text-2xl text-white tracking-wide">
-                   TIMELINE
+              <div className="flex justify-between items-center mb-6 bg-[#2d2d2d] p-4 border-wobbly-sm shadow-sketch transform -rotate-1">
+                <h3 className="font-heading text-2xl text-white tracking-wide">
+                   Storyboard
                 </h3>
                 <button 
                   onClick={addSegment}
                   disabled={isProcessingAction}
-                  className="px-4 py-2 bg-[#FFE600] border-2 border-black text-black font-black rounded hover:bg-white transition-colors text-sm uppercase"
+                  className="px-3 py-1 bg-[#fff9c4] border-2 border-white text-[#2d2d2d] font-bold rounded hover:bg-white transition-colors text-sm uppercase"
                 >
                   {isProcessingAction ? '...' : '+ Add'}
                 </button>
               </div>
               
-              <div className="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-hide pb-20">
+              <div className="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-hide pb-20 p-2">
                 {segments.map((seg, idx) => {
-                  const accent = ACCENT_COLORS[idx % ACCENT_COLORS.length];
-                  const nextAccent = ACCENT_COLORS[(idx + 1) % ACCENT_COLORS.length];
-                  
                   return (
                     <div 
                       key={seg.id} 
-                      className={`relative p-5 rounded-3xl border-4 transition-all duration-300 ${editingSegmentId === seg.id ? 'scale-105 z-20' : 'hover:scale-102 hover:rotate-1'}`}
-                      style={{ 
-                        backgroundColor: '#2D1B4E', 
-                        borderColor: editingSegmentId === seg.id ? '#FFFFFF' : accent,
-                        boxShadow: editingSegmentId === seg.id ? `8px 8px 0px ${nextAccent}` : `6px 6px 0px ${nextAccent}`
-                      }}
+                      className={`relative p-5 bg-white border-[2px] border-[#2d2d2d] transition-all duration-300 ${editingSegmentId === seg.id ? 'scale-105 z-20 border-wobbly-sm shadow-sketch-lg rotate-1' : 'hover:rotate-1 border-wobbly-sm shadow-sketch-sm'}`}
                     >
+                      {/* Sticky Note decoration for active item */}
+                      {editingSegmentId === seg.id && (
+                          <div className="absolute -top-3 -right-2 w-8 h-8 rounded-full bg-[#ff4d4d] border-2 border-[#2d2d2d] shadow-sm z-30"></div>
+                      )}
+
                       {/* Header */}
-                      <div className="flex justify-between items-center mb-3 border-b-2 border-dashed border-white/20 pb-2">
-                        <span className="font-display text-2xl" style={{ color: accent }}>#{idx + 1}</span>
+                      <div className="flex justify-between items-center mb-3 border-b-2 border-dashed border-[#2d2d2d]/20 pb-2">
+                        <span className="font-heading text-2xl text-[#2d2d2d]">#{idx + 1}</span>
                         <div className="flex gap-2">
-                           <button onClick={() => deleteSegment(seg.id)} className="text-white/50 hover:text-[#FF3AF2] font-bold">✕</button>
-                           <button onClick={() => moveSegment(idx, 'up')} disabled={idx === 0} className="text-white/50 hover:text-[#00F5D4]">↑</button>
-                           <button onClick={() => moveSegment(idx, 'down')} disabled={idx === segments.length - 1} className="text-white/50 hover:text-[#00F5D4]">↓</button>
+                           <button onClick={() => deleteSegment(seg.id)} className="text-[#2d2d2d]/40 hover:text-[#ff4d4d] font-bold text-lg">✕</button>
+                           <button onClick={() => moveSegment(idx, 'up')} disabled={idx === 0} className="text-[#2d2d2d]/40 hover:text-[#2d5da1] font-bold text-lg">↑</button>
+                           <button onClick={() => moveSegment(idx, 'down')} disabled={idx === segments.length - 1} className="text-[#2d2d2d]/40 hover:text-[#2d5da1] font-bold text-lg">↓</button>
                         </div>
                       </div>
 
                       {/* Content */}
                       {editingSegmentId === seg.id ? (
                         <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2">
-                             <div className="bg-[#00F5D4]/20 p-2 rounded border-2 border-[#00F5D4] border-dashed text-center">
-                                <button onClick={() => scanTextForSegment(seg.id)} disabled={isProcessingAction} className="text-xs font-bold text-[#00F5D4] uppercase hover:text-white">
+                             <div className="bg-[#2d5da1]/10 p-2 rounded border-2 border-[#2d5da1] border-dashed text-center">
+                                <button onClick={() => scanTextForSegment(seg.id)} disabled={isProcessingAction} className="text-xs font-bold text-[#2d5da1] uppercase hover:underline">
                                     {isProcessingAction ? 'Scanning...' : '📍 Auto-Scan Box'}
                                 </button>
                              </div>
                              <div>
-                                <label className="text-xs font-bold text-white/60 uppercase">Text</label>
+                                <label className="text-xs font-bold text-[#2d2d2d]/60 uppercase">Text</label>
                                 <textarea 
                                     value={seg.text} 
                                     onChange={(e) => updateSegmentText(seg.id, e.target.value)}
-                                    className="w-full bg-black/40 border-2 border-white/20 rounded p-2 text-white font-mono text-sm focus:border-[#FFE600] outline-none"
+                                    className="w-full bg-[#fdfbf7] border-2 border-[#2d2d2d] rounded-sm p-2 text-[#2d2d2d] font-hand text-lg focus:border-[#2d5da1] outline-none"
                                     rows={2}
                                 />
                              </div>
                              <div>
-                                <label className="text-xs font-bold text-white/60 uppercase">Seconds</label>
+                                <label className="text-xs font-bold text-[#2d2d2d]/60 uppercase">Seconds</label>
                                 <input 
                                     type="number" step="0.5" 
                                     value={seg.duration} 
                                     onChange={(e) => updateSegmentDuration(seg.id, Number(e.target.value))}
-                                    className="w-full bg-black/40 border-2 border-white/20 rounded p-2 text-white font-mono text-sm focus:border-[#FFE600] outline-none"
+                                    className="w-full bg-[#fdfbf7] border-2 border-[#2d2d2d] rounded-sm p-2 text-[#2d2d2d] font-hand text-lg focus:border-[#2d5da1] outline-none"
                                 />
                              </div>
                              <button 
                                 onClick={() => setEditingSegmentId(null)}
-                                className="w-full py-2 bg-[#FFE600] text-black font-bold uppercase rounded hover:bg-white"
+                                className="w-full py-2 bg-[#fff9c4] text-[#2d2d2d] border-2 border-[#2d2d2d] font-bold uppercase rounded-sm hover:bg-[#ffe082]"
                              >
                                 Done
                              </button>
                         </div>
                       ) : (
                         <div onClick={() => setEditingSegmentId(seg.id)} className="cursor-pointer group">
-                             <p className="text-white font-bold text-lg leading-tight line-clamp-2 group-hover:text-[#FFE600] transition-colors">
-                                 {seg.text || <span className="italic text-white/40">Empty Scene</span>}
+                             <p className="text-[#2d2d2d] font-hand text-xl leading-tight line-clamp-2 group-hover:text-[#2d5da1] transition-colors">
+                                 {seg.text || <span className="italic text-[#2d2d2d]/40">Empty Scene</span>}
                              </p>
                              <div className="mt-3 flex gap-2">
-                                <span className="px-2 py-1 bg-black/40 rounded text-xs font-mono text-white/70 border border-white/10">
+                                <span className="px-2 py-1 bg-[#e5e0d8] rounded-sm text-xs font-bold text-[#2d2d2d]/70 border border-[#2d2d2d]/20">
                                     ⏱ {seg.duration}s
                                 </span>
                                 {seg.audioBase64 ? (
-                                    <span className="px-2 py-1 bg-[#00F5D4]/20 text-[#00F5D4] rounded text-xs font-bold border border-[#00F5D4]/50">
+                                    <span className="px-2 py-1 bg-[#2d5da1]/10 text-[#2d5da1] rounded-sm text-xs font-bold border border-[#2d5da1]/50">
                                         AUDIO READY
                                     </span>
                                 ) : (
-                                    <span className="px-2 py-1 bg-[#FF3AF2]/20 text-[#FF3AF2] rounded text-xs font-bold border border-[#FF3AF2]/50">
+                                    <span className="px-2 py-1 bg-[#ff4d4d]/10 text-[#ff4d4d] rounded-sm text-xs font-bold border border-[#ff4d4d]/50">
                                         BROWSER TTS
                                     </span>
                                 )}
