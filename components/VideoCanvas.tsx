@@ -152,7 +152,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     }
 
     // --- PLAYBACK RENDERING ---
-    ctx.filter = 'blur(15px) grayscale(50%) opacity(0.8)';
+    // Reduce blur intensity to keep context visible
+    ctx.filter = 'blur(5px) grayscale(30%) opacity(0.5)';
     ctx.drawImage(img, x, y, w, h);
     ctx.filter = 'none';
 
@@ -513,9 +514,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
   return (
     <div className="flex flex-col items-center gap-6 w-full">
-      {/* Taped Photo Container */}
+      {/* Taped Photo Container - Removed blurry tape UI */}
       <div className="relative p-2 bg-white border-[3px] border-[#2d2d2d] border-wobbly-sm shadow-sketch-lg rotate-1 transition-transform duration-500 hover:rotate-0">
-        <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 w-32 h-8 tape-gray rotate-1 z-10"></div>
         <canvas 
           ref={canvasRef} 
           width={canvasDims.width} 

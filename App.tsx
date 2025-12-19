@@ -58,7 +58,7 @@ const App: React.FC = () => {
   const [segments, setSegments] = useState<MemeSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
-  const [useAI, setUseAI] = useState<boolean>(true);
+  const [useAI, setUseAI] = useState<boolean>(false); // Changed to false (Manual default)
   const [isProcessingAction, setIsProcessingAction] = useState<boolean>(false);
   
   // TTS State
