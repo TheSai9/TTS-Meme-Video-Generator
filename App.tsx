@@ -23,29 +23,41 @@ const Tape = ({ className = "" }: { className?: string }) => (
   <div className={`absolute h-8 w-24 tape-gray transform ${className}`} style={{ zIndex: 10 }}></div>
 );
 
-const Header = () => (
-  <header className="relative w-full max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center mb-16 pt-12 px-6 z-10">
+interface HeaderProps {
+  segmentCount: number;
+  totalDuration: number;
+}
+
+const Header: React.FC<HeaderProps> = ({ segmentCount, totalDuration }) => (
+  <header className="relative w-full max-w-[1400px] mx-auto flex flex-col md:flex-row justify-between items-center mb-8 pt-8 px-6 z-10">
     <div className="relative group cursor-default">
       <h1 className="relative font-heading text-6xl md:text-7xl text-[#2d2d2d] transform -rotate-2 group-hover:rotate-0 transition-transform duration-300">
         Meme<span className="text-[#ff4d4d] underline decoration-wavy decoration-2 underline-offset-4">Reveal</span>
       </h1>
       <div className="absolute -top-6 -right-8 transform rotate-12">
         <span className="bg-[#ff4d4d] text-white font-bold px-3 py-1 text-sm border-wobbly-sm shadow-sketch-sm inline-block transform -rotate-3">
-          AI Powered!
+          BETA
         </span>
       </div>
     </div>
     
-    <div className="mt-8 md:mt-0 flex flex-col items-center md:items-end">
-      <div className="bg-white p-4 border-[3px] border-[#2d2d2d] border-wobbly-md shadow-sketch transform rotate-1 relative">
-        <Tape className="-top-3 left-10 -rotate-2" />
-        <p className="font-heading font-bold text-[#2d2d2d] text-xl leading-none">
-          Sketchbook Mode
-        </p>
-        <div className="flex gap-1 mt-2">
-          <div className="w-3 h-3 rounded-full bg-[#ff4d4d] border border-[#2d2d2d]"></div>
-          <div className="w-3 h-3 rounded-full bg-[#2d5da1] border border-[#2d2d2d]"></div>
-          <div className="w-3 h-3 rounded-full bg-[#fff9c4] border border-[#2d2d2d]"></div>
+    {/* Relevant Project Stats Sticky Note */}
+    <div className="mt-8 md:mt-0 relative transform rotate-1 hover:-rotate-1 transition-transform">
+      <Tape className="-top-3 left-1/2 -translate-x-1/2 -rotate-2" />
+      <div className="bg-[#fff9c4] p-4 min-w-[200px] border-[3px] border-[#2d2d2d] border-wobbly-sm shadow-sketch flex flex-col items-center">
+        <h3 className="font-heading font-bold text-[#2d2d2d] text-xl border-b-2 border-dashed border-[#2d2d2d]/20 pb-1 w-full text-center mb-2">
+          Project Stats
+        </h3>
+        <div className="flex justify-between w-full gap-4 font-hand font-bold text-lg text-[#2d2d2d]">
+           <div className="flex flex-col items-center">
+             <span className="text-2xl">🎞️</span>
+             <span>{segmentCount} Panels</span>
+           </div>
+           <div className="w-[2px] bg-[#2d2d2d]/20 rounded-full"></div>
+           <div className="flex flex-col items-center">
+             <span className="text-2xl">⏱️</span>
+             <span>{totalDuration.toFixed(1)}s</span>
+           </div>
         </div>
       </div>
     </div>
@@ -58,7 +70,7 @@ const App: React.FC = () => {
   const [segments, setSegments] = useState<MemeSegment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editingSegmentId, setEditingSegmentId] = useState<string | null>(null);
-  const [useAI, setUseAI] = useState<boolean>(false); // Changed to false (Manual default)
+  const [useAI, setUseAI] = useState<boolean>(false); // Manual default
   const [isProcessingAction, setIsProcessingAction] = useState<boolean>(false);
   
   // TTS State
@@ -217,6 +229,8 @@ const App: React.FC = () => {
     }
   };
 
+  const totalDuration = segments.reduce((acc, seg) => acc + (seg.duration || 0), 0);
+
   return (
     <div className="min-h-screen relative overflow-x-hidden">
       {/* Decorative Background Elements */}
@@ -227,9 +241,10 @@ const App: React.FC = () => {
         <div className="w-40 h-40 border-[3px] border-[#2d2d2d] border-dashed rounded-full"></div>
       </div>
 
-      <Header />
+      <Header segmentCount={segments.length} totalDuration={totalDuration} />
 
-      <main className="relative z-10 w-full max-w-6xl mx-auto px-4 pb-20 flex flex-col items-center gap-12">
+      {/* Increased max-width for larger canvas area */}
+      <main className="relative z-10 w-full max-w-[1400px] mx-auto px-4 pb-20 flex flex-col items-center gap-12">
         
         {error && (
           <div className="w-full max-w-2xl bg-[#ff4d4d] border-[3px] border-[#2d2d2d] text-white font-bold p-6 border-wobbly-md shadow-sketch rotate-1">
@@ -325,16 +340,17 @@ const App: React.FC = () => {
         {(appState === AppState.READY || appState === AppState.PLAYING || appState === AppState.RECORDING) && imageSrc && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 w-full">
             
-            {/* Left: Canvas (8 cols) */}
-            <div className="lg:col-span-8 flex flex-col items-center">
-              <div className="relative z-20">
+            {/* Left: Canvas (Adjusted col-span for larger size: 9 vs 3) */}
+            <div className="lg:col-span-9 flex flex-col items-center">
+              <div className="relative z-20 w-full">
                  <VideoCanvas 
                     imageSrc={imageSrc} 
                     segments={segments} 
                     appState={appState} 
                     setAppState={setAppState} 
-                    width={800}
-                    height={600}
+                    // Width prop doesn't constrain it anymore, CSS does
+                    width={1200}
+                    height={800}
                     editingSegmentId={editingSegmentId}
                     onUpdateSegment={updateSegmentBox}
                     voice={getSelectedVoice()}
@@ -368,8 +384,8 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Segment List (4 cols) */}
-            <div className="lg:col-span-4 flex flex-col h-[700px]">
+            {/* Right: Segment List (Adjusted col-span: 3) */}
+            <div className="lg:col-span-3 flex flex-col h-[700px]">
               <div className="flex justify-between items-center mb-6 bg-[#2d2d2d] p-4 border-wobbly-sm shadow-sketch transform -rotate-1">
                 <h3 className="font-heading text-2xl text-white tracking-wide">
                    Storyboard

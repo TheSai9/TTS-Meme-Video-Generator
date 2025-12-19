@@ -515,12 +515,12 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   return (
     <div className="flex flex-col items-center gap-6 w-full">
       {/* Taped Photo Container - Removed blurry tape UI */}
-      <div className="relative p-2 bg-white border-[3px] border-[#2d2d2d] border-wobbly-sm shadow-sketch-lg rotate-1 transition-transform duration-500 hover:rotate-0">
+      <div className="relative p-2 bg-white border-[3px] border-[#2d2d2d] border-wobbly-sm shadow-sketch-lg rotate-1 transition-transform duration-500 hover:rotate-0 w-full flex justify-center">
         <canvas 
           ref={canvasRef} 
           width={canvasDims.width} 
           height={canvasDims.height}
-          className="w-full h-auto max-h-[60vh] object-contain touch-none border-2 border-[#2d2d2d] border-dashed"
+          className="w-full h-auto max-h-[80vh] object-contain touch-none border-2 border-[#2d2d2d] border-dashed"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
