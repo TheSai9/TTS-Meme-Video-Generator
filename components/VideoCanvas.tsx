@@ -132,17 +132,20 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         ctx.drawImage(img, x, y, w, h);
         ctx.restore();
 
-        ctx.strokeStyle = '#06b6d4';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
+        // Maximalist Edit Box
+        ctx.strokeStyle = '#00F5D4';
+        ctx.lineWidth = 4;
+        ctx.setLineDash([8, 8]);
         ctx.strokeRect(dx, dy, dw, dh);
         ctx.setLineDash([]);
         
-        ctx.fillStyle = '#fff';
-        const hs = 8;
+        ctx.fillStyle = '#FF3AF2';
+        const hs = 12;
         const handles = [{ x: dx, y: dy }, { x: dx + dw, y: dy }, { x: dx, y: dy + dh }, { x: dx + dw, y: dy + dh }];
         handles.forEach(h => {
             ctx.fillRect(h.x - hs/2, h.y - hs/2, hs, hs);
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 2;
             ctx.strokeRect(h.x - hs/2, h.y - hs/2, hs, hs);
         });
       }
@@ -180,11 +183,11 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
         // Highlight only if NOT recording
         if (index === currentIndex && currentState !== AppState.RECORDING) {
-          ctx.strokeStyle = '#facc15';
-          ctx.lineWidth = 4;
-          ctx.shadowColor = '#facc15';
-          ctx.shadowBlur = 10;
-          ctx.strokeRect(dx - 2, dy - 2, dw + 4, dh + 4);
+          ctx.strokeStyle = '#FFE600';
+          ctx.lineWidth = 6;
+          ctx.shadowColor = '#FF3AF2';
+          ctx.shadowBlur = 20;
+          ctx.strokeRect(dx - 3, dy - 3, dw + 6, dh + 6);
           ctx.shadowBlur = 0;
         }
       }
@@ -225,7 +228,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     const dw = sw * layout.scale;
     const dh = sh * layout.scale;
     
-    const hitDist = 15;
+    const hitDist = 20; // Larger hit area
 
     if (Math.abs(mx - dx) < hitDist && Math.abs(my - dy) < hitDist) setDragMode('RESIZE_TL');
     else if (Math.abs(mx - (dx + dw)) < hitDist && Math.abs(my - dy) < hitDist) setDragMode('RESIZE_TR');
@@ -253,7 +256,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
                 const dy = layout.y + sy * layout.scale;
                 const dw = sw * layout.scale;
                 const dh = sh * layout.scale;
-                const hit = 10;
+                const hit = 15;
                 if ((Math.abs(mx - dx) < hit && Math.abs(my - dy) < hit) || (Math.abs(mx-(dx+dw))<hit && Math.abs(my-(dy+dh))<hit)) canvasRef.current.style.cursor = 'nwse-resize';
                 else if ((Math.abs(mx-(dx+dw))<hit && Math.abs(my-dy)<hit) || (Math.abs(mx-dx)<hit && Math.abs(my-(dy+dh))<hit)) canvasRef.current.style.cursor = 'nesw-resize';
                 else if (mx > dx && mx < dx + dw && my > dy && my < dy + dh) canvasRef.current.style.cursor = 'move';
@@ -506,37 +509,39 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   }, [appState]);
 
   return (
-    <div className="flex flex-col items-center gap-4 w-full">
-      <div className="relative rounded-xl overflow-hidden shadow-2xl border border-slate-700 bg-slate-900 select-none">
+    <div className="flex flex-col items-center gap-6 w-full">
+      <div className="relative rounded-3xl overflow-hidden shadow-hard-cyan border-8 border-[#FF3AF2] bg-[#0D0D1A] select-none p-2 rotate-1 hover:rotate-0 transition-transform duration-500">
         <canvas 
           ref={canvasRef} 
           width={canvasDims.width} 
           height={canvasDims.height}
-          className="w-full h-auto max-h-[60vh] object-contain touch-none"
+          className="w-full h-auto max-h-[60vh] object-contain touch-none rounded-2xl"
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
         />
         {appState === AppState.PLAYING && (
-          <div className="absolute top-4 right-4 bg-red-500/80 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse pointer-events-none">
-            PREVIEWING
+          <div className="absolute top-6 right-6 bg-[#FF3AF2] border-4 border-white text-white px-4 py-2 rounded-full text-sm font-black animate-pulse pointer-events-none shadow-hard-yellow uppercase">
+            Previewing
           </div>
         )}
         {appState === AppState.RECORDING && (
-          <div className="absolute top-4 right-4 bg-red-600 text-white px-3 py-1 rounded-full text-xs font-bold animate-pulse flex items-center gap-2 pointer-events-none">
-            <span className="block w-2 h-2 bg-white rounded-full"></span> REC
+          <div className="absolute top-6 right-6 bg-[#FF6B35] border-4 border-white text-white px-4 py-2 rounded-full text-sm font-black animate-pulse flex items-center gap-2 pointer-events-none shadow-hard-magenta uppercase">
+            <span className="block w-3 h-3 bg-white rounded-full"></span> REC
           </div>
         )}
         {editingSegmentId && (
-           <div className="absolute top-4 right-4 bg-cyan-600/90 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg pointer-events-none">
-             DRAG TO EDIT
+           <div className="absolute top-6 right-6 bg-[#00F5D4] text-black border-4 border-black px-4 py-2 rounded-full text-sm font-black shadow-hard-magenta pointer-events-none uppercase">
+             Drag to Edit
            </div>
         )}
       </div>
       
-      <div className="h-12 text-center text-slate-300 font-medium text-lg min-h-[3rem] px-4">
-        {activeSegmentId ? segments.find(s => s.id === activeSegmentId)?.text : "..."}
+      <div className="h-16 flex items-center justify-center w-full max-w-2xl bg-black/40 border-4 border-[#7B2FFF] rounded-2xl px-6">
+        <p className="text-center text-[#FFE600] font-heading font-bold text-xl min-h-[1.5rem] uppercase tracking-wide">
+            {activeSegmentId ? `"${segments.find(s => s.id === activeSegmentId)?.text}"` : "..."}
+        </p>
       </div>
     </div>
   );

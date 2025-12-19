@@ -4,6 +4,64 @@ import { analyzeMemeImage, generateSpeechForSegment } from './services/geminiSer
 import { analyzeLocalImage, performOCROnBox, calculateSegmentDuration, isTextCoherent } from './services/localAnalysisService';
 import VideoCanvas from './components/VideoCanvas';
 
+// --- MAXIMALIST CONSTANTS ---
+const ACCENT_COLORS = [
+  '#FF3AF2', // Magenta
+  '#00F5D4', // Cyan
+  '#FFE600', // Yellow
+  '#FF6B35', // Orange
+  '#7B2FFF', // Purple
+];
+
+const DECORATIVE_EMOJIS = ['⚡', '🔥', '🚀', '✨', '👀', '💀', '👽', '👾'];
+
+// --- SUBCOMPONENTS ---
+
+const FloatingShape = ({ index }: { index: number }) => {
+  // Deterministic "randomness" based on index
+  const top = `${(index * 17) % 90}%`;
+  const left = `${(index * 23) % 90}%`;
+  const size = `${(index % 3) * 20 + 40}px`; // 40, 60, 80px
+  const delay = `${index * 1.5}s`;
+  const emoji = DECORATIVE_EMOJIS[index % DECORATIVE_EMOJIS.length];
+  const rotation = index % 2 === 0 ? 'animate-float' : 'animate-wiggle';
+
+  return (
+    <div 
+      className={`absolute select-none pointer-events-none z-0 text-6xl opacity-40 mix-blend-screen ${rotation}`}
+      style={{ top, left, animationDelay: delay, fontSize: size }}
+      aria-hidden="true"
+    >
+      {emoji}
+    </div>
+  );
+};
+
+const Header = () => (
+  <header className="relative w-full max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center mb-16 pt-8 px-4 z-50">
+    <div className="relative group cursor-default">
+      <div className="absolute -inset-2 bg-gradient-to-r from-[#FF3AF2] via-[#00F5D4] to-[#FFE600] rounded-lg blur opacity-75 group-hover:opacity-100 transition duration-1000 group-hover:duration-200 animate-tilt"></div>
+      <h1 className="relative font-display text-7xl md:text-8xl text-white transform -rotate-2 group-hover:rotate-0 transition-transform duration-300 text-shadow-neon">
+        MEME<span className="text-[#FFE600]">REVEAL</span>
+      </h1>
+      <div className="absolute -bottom-4 right-0 rotate-3 bg-[#FF6B35] text-black font-bold px-2 py-0.5 text-xs uppercase tracking-widest border-2 border-white shadow-hard-cyan">
+        AI Powered
+      </div>
+    </div>
+    
+    <div className="mt-8 md:mt-0 flex flex-col items-end">
+      <div className="bg-[#2D1B4E]/80 backdrop-blur-sm border-4 border-[#00F5D4] p-4 rounded-xl shadow-stack-sm transform rotate-1 hover:rotate-2 transition-all">
+        <p className="font-heading font-black text-[#FF3AF2] uppercase tracking-tighter text-lg leading-none">
+          Dopamine Level
+        </p>
+        <div className="w-full bg-black/50 h-3 mt-2 rounded-full overflow-hidden border border-white/20">
+          <div className="h-full bg-gradient-to-r from-[#FF3AF2] to-[#FFE600] w-[90%] animate-pulse"></div>
+        </div>
+      </div>
+    </div>
+  </header>
+);
+
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
@@ -22,23 +80,16 @@ const App: React.FC = () => {
       const available = window.speechSynthesis.getVoices();
       setVoices(available);
       if (available.length > 0 && !selectedVoiceName) {
-        // Try to find a good default (Google US English or similar)
         const defaultVoice = available.find(v => v.name.includes('Google US English')) || available[0];
         setSelectedVoiceName(defaultVoice.name);
       }
     };
-    
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
-    
-    return () => {
-      window.speechSynthesis.onvoiceschanged = null;
-    };
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
   }, [selectedVoiceName]);
 
-  const getSelectedVoice = () => {
-      return voices.find(v => v.name === selectedVoiceName) || null;
-  };
+  const getSelectedVoice = () => voices.find(v => v.name === selectedVoiceName) || null;
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -56,22 +107,19 @@ const App: React.FC = () => {
   const processImage = async (base64: string) => {
     setError(null);
     setAppState(AppState.ANALYZING);
-
     const rawBase64 = base64.split(',')[1];
 
-    // --- MANUAL MODE (Local/Open Source) ---
     if (!useAI) {
         try {
-            // Local analysis: Heuristic detection + Tesseract OCR
             const analyzedSegments = await analyzeLocalImage(rawBase64);
             setSegments(analyzedSegments);
             setAppState(AppState.READY);
         } catch (e: any) {
             console.error("Local Analysis Failed", e);
-            setError("Local analysis failed. Falling back to empty editor.");
+            setError("Local analysis failed.");
             setSegments([{
                 id: `manual-init-${Date.now()}`,
-                text: "Could not detect panels. Edit manually.",
+                text: "MANUAL MODE // EDIT NOW",
                 box: { xmin: 100, ymin: 100, xmax: 900, ymax: 900 },
                 duration: 3
             }]);
@@ -80,26 +128,20 @@ const App: React.FC = () => {
         return;
     }
 
-    // --- AI MODE (Gemini) ---
     try {
-      // 1. Vision Analysis
       const analyzedSegments = await analyzeMemeImage(rawBase64);
-      
-      // 2. Generate Audio
       setAppState(AppState.GENERATING_AUDIO);
       const segmentsWithAudio = await Promise.all(analyzedSegments.map(async (seg) => {
         try {
           const { audioBase64, audioType } = await generateSpeechForSegment(seg.text);
-          return { ...seg, audioBase64, audioType }; // Duration handled in analyzeMemeImage or defaults
+          return { ...seg, audioBase64, audioType };
         } catch (e) {
           console.error(`Failed to generate audio for segment: ${seg.text}`, e);
           return seg;
         }
       }));
-
       setSegments(segmentsWithAudio);
       setAppState(AppState.READY);
-
     } catch (e: any) {
       setError(e.message || "Failed to analyze meme.");
       setAppState(AppState.IDLE);
@@ -114,6 +156,7 @@ const App: React.FC = () => {
     setEditingSegmentId(null);
   };
 
+  // ... (Keeping logic functions same: moveSegment, updateSegmentBox, etc.) ...
   const moveSegment = (index: number, direction: 'up' | 'down') => {
     if (appState !== AppState.READY) return;
     const newSegments = [...segments];
@@ -126,13 +169,7 @@ const App: React.FC = () => {
   };
 
   const updateSegmentBox = (id: string, partialBox: Partial<BoundingBox>) => {
-    setSegments(prev => prev.map(s => {
-      if (s.id !== id) return s;
-      return { 
-        ...s, 
-        box: { ...s.box, ...partialBox } 
-      };
-    }));
+    setSegments(prev => prev.map(s => s.id !== id ? s : { ...s, box: { ...s.box, ...partialBox } }));
   };
   
   const updateSegmentDuration = (id: string, duration: number) => {
@@ -142,7 +179,6 @@ const App: React.FC = () => {
   const updateSegmentText = (id: string, text: string) => {
     setSegments(prev => prev.map(s => {
         if (s.id !== id) return s;
-        // Recalculate duration when text changes manually
         const newDuration = calculateSegmentDuration(text);
         return { ...s, text, duration: newDuration };
     }));
@@ -157,19 +193,13 @@ const App: React.FC = () => {
       if (!imageSrc) return;
       const seg = segments.find(s => s.id === id);
       if (!seg) return;
-
       setIsProcessingAction(true);
       try {
           const rawBase64 = imageSrc.split(',')[1];
           const text = await performOCROnBox(rawBase64, seg.box);
-          
           let finalText = "(Visual Only)";
-          if (isTextCoherent(text)) {
-              finalText = text;
-          }
-
+          if (isTextCoherent(text)) finalText = text;
           const duration = calculateSegmentDuration(finalText);
-          
           setSegments(prev => prev.map(s => s.id === id ? { ...s, text: finalText, duration } : s));
       } catch (e) {
           console.error("Scan failed", e);
@@ -181,115 +211,99 @@ const App: React.FC = () => {
   const addSegment = async () => {
     const defaultBox = { xmin: 300, ymin: 300, xmax: 700, ymax: 700 };
     const newId = `custom-${Date.now()}`;
-    
-    // Preliminary segment
-    const newSeg: MemeSegment = {
-        id: newId,
-        text: "Scanning...",
-        box: defaultBox,
-        duration: 1
-    };
+    const newSeg: MemeSegment = { id: newId, text: "Scanning...", box: defaultBox, duration: 1 };
     setSegments(prev => [...prev, newSeg]);
     setEditingSegmentId(newId);
-
-    // Auto-scan the new area
     if (imageSrc) {
         setIsProcessingAction(true);
         try {
             const rawBase64 = imageSrc.split(',')[1];
             const text = await performOCROnBox(rawBase64, defaultBox);
-            
             let finalText = "New Reveal";
-            if (isTextCoherent(text)) {
-                finalText = text;
-            }
+            if (isTextCoherent(text)) finalText = text;
             const duration = calculateSegmentDuration(finalText);
-            
             setSegments(prev => prev.map(s => s.id === newId ? { ...s, text: finalText, duration } : s));
-        } catch (e) {
-            console.error("Auto-scan on new segment failed", e);
-            setSegments(prev => prev.map(s => s.id === newId ? { ...s, text: "New Reveal" } : s));
-        } finally {
-            setIsProcessingAction(false);
-        }
+        } catch (e) { console.error("Auto-scan failed", e); setSegments(prev => prev.map(s => s.id === newId ? { ...s, text: "New Reveal" } : s));
+        } finally { setIsProcessingAction(false); }
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 flex flex-col items-center">
-      <header className="w-full max-w-4xl flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
-        <h1 className="text-2xl font-black bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-          MemeReveal
-        </h1>
-        <div className="text-xs text-slate-500 font-mono">
-          Powered by Gemini 2.5
-        </div>
-      </header>
+    <div className="min-h-screen relative overflow-x-hidden">
+      {/* BACKGROUND LAYERS */}
+      <div className="fixed inset-0 pattern-dots pointer-events-none z-0"></div>
+      <div className="fixed inset-0 pattern-checker pointer-events-none z-0 opacity-20"></div>
+      
+      {/* FLOATING DECORATIONS */}
+      {Array.from({ length: 8 }).map((_, i) => <FloatingShape key={i} index={i} />)}
 
-      <main className="w-full max-w-5xl flex flex-col items-center gap-8">
+      <Header />
+
+      <main className="relative z-10 w-full max-w-7xl mx-auto px-4 pb-20 flex flex-col items-center gap-12">
         
-        {/* Error Banner */}
         {error && (
-          <div className="w-full max-w-lg bg-red-900/30 border border-red-800 text-red-200 px-4 py-3 rounded-lg text-sm mb-4">
-            Error: {error}
+          <div className="w-full max-w-2xl bg-[#FF6B35] border-4 border-white text-black font-bold p-6 rounded-2xl shadow-stack-lg rotate-1 animate-wiggle">
+            ERROR: {error}
           </div>
         )}
 
         {/* State: IDLE - Upload Area */}
         {appState === AppState.IDLE && (
-          <div className="flex flex-col gap-6 w-full max-w-xl">
+          <div className="flex flex-col gap-8 w-full max-w-2xl">
             
-            {/* Mode Toggle */}
-            <div className="flex items-center justify-between bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+            {/* Mode Toggle - Maximalist */}
+            <div className="flex items-center justify-between bg-[#2D1B4E]/90 backdrop-blur-md p-6 rounded-3xl border-4 border-[#00F5D4] shadow-hard-magenta transform -rotate-1">
                 <div>
-                    <h3 className="text-sm font-bold text-slate-200">AI Automation</h3>
-                    <p className="text-xs text-slate-500">Use Gemini Vision & TTS to analyze image.</p>
+                    <h3 className="font-display text-3xl text-white tracking-wide">
+                        AI <span className="text-[#FFE600]">SUPERCHARGE</span>
+                    </h3>
+                    <p className="font-mono text-sm text-[#00F5D4] mt-1">Vision + TTS Analysis</p>
                 </div>
                 <button 
                     onClick={() => setUseAI(!useAI)}
-                    className={`relative w-12 h-6 rounded-full transition-colors ${useAI ? 'bg-indigo-500' : 'bg-slate-700'}`}
+                    className={`relative w-20 h-10 rounded-full transition-colors border-4 ${useAI ? 'bg-[#FF3AF2] border-[#FFE600]' : 'bg-[#2D1B4E] border-[#7B2FFF]'}`}
                 >
-                    <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${useAI ? 'translate-x-6' : 'translate-x-0'}`} />
+                    <span className={`absolute top-0 left-0 bg-white w-8 h-8 rounded-full border-2 border-black transition-transform transform ${useAI ? 'translate-x-10' : 'translate-x-0'} shadow-sm`} />
                 </button>
             </div>
 
-            {/* Manual Mode Settings (Voice Selection) */}
+            {/* Manual Mode Voices */}
             {!useAI && (
-              <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
-                  <label className="text-xs font-bold text-slate-400 block mb-2">Narrator Voice (Local Browser TTS)</label>
+              <div className="bg-[#2D1B4E] p-6 rounded-3xl border-4 border-[#FFE600] shadow-hard-cyan rotate-1">
+                  <label className="font-heading font-black text-xl text-white block mb-2 uppercase">Narrator Voice</label>
                   <select 
                     value={selectedVoiceName}
                     onChange={(e) => setSelectedVoiceName(e.target.value)}
-                    className="w-full bg-slate-800 text-slate-200 text-xs p-2 rounded border border-slate-700 focus:border-cyan-500 outline-none"
+                    className="w-full bg-black/50 text-white font-bold p-4 rounded-xl border-4 border-[#FF3AF2] focus:outline-none focus:ring-4 focus:ring-[#00F5D4] focus:ring-offset-2 focus:ring-offset-[#2D1B4E]"
                   >
-                    {voices.length === 0 && <option value="">Loading voices...</option>}
-                    {voices.map(v => (
-                      <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
-                    ))}
+                    {voices.map(v => <option key={v.name} value={v.name}>{v.name}</option>)}
                   </select>
               </div>
             )}
 
-            <div className="w-full h-64 border-2 border-dashed border-slate-700 rounded-2xl flex flex-col items-center justify-center bg-slate-900/50 hover:bg-slate-900/80 transition-all cursor-pointer relative group">
-              <input 
-                type="file" 
-                accept="image/*" 
-                onChange={handleFileUpload} 
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-              />
-              <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-cyan-400">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-slate-200">Upload a Meme</h3>
-              <p className="text-slate-500 text-sm mt-2">JPG, PNG supported</p>
+            {/* Upload Zone - Maximalist */}
+            <div className="relative group cursor-pointer perspective-1000">
+                <div className="absolute inset-0 bg-gradient-to-r from-[#FF3AF2] to-[#00F5D4] rounded-3xl blur opacity-25 group-hover:opacity-60 transition duration-500 animate-pulse"></div>
+                <div className="relative w-full h-80 bg-[#0D0D1A] border-8 border-dashed border-[#FF3AF2] group-hover:border-[#FFE600] rounded-3xl flex flex-col items-center justify-center transition-all duration-300 transform group-hover:scale-[1.02] group-hover:rotate-1">
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={handleFileUpload} 
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-50"
+                  />
+                  <div className="w-24 h-24 bg-[#7B2FFF] rounded-full flex items-center justify-center mb-6 border-4 border-[#00F5D4] shadow-hard-yellow group-hover:animate-bounce">
+                    <span className="text-5xl">📂</span>
+                  </div>
+                  <h3 className="font-display text-4xl text-white uppercase tracking-wider text-shadow-neon">
+                    Drop Meme Here
+                  </h3>
+                  <p className="text-[#00F5D4] font-bold mt-2 font-mono">JPG / PNG / WEBP</p>
+                </div>
             </div>
 
             {!useAI && (
-               <div className="text-center text-xs text-slate-500 bg-slate-900 p-2 rounded border border-slate-800">
-                   Running in <strong className="text-slate-300">Manual Mode</strong>. 
-                   Using local detection & OCR. Audio provided by your Browser.
+               <div className="text-center font-bold text-[#FF6B35] bg-[#2D1B4E] p-3 rounded-xl border-2 border-[#FF6B35] border-dashed">
+                   MANUAL MODE ACTIVE // LOCAL ONLY
                </div>
             )}
           </div>
@@ -297,195 +311,164 @@ const App: React.FC = () => {
 
         {/* State: LOADING */}
         {(appState === AppState.ANALYZING || appState === AppState.GENERATING_AUDIO) && (
-          <div className="w-full max-w-xl h-64 flex flex-col items-center justify-center">
-            <div className="relative w-20 h-20 mb-6">
-              <div className="absolute inset-0 border-4 border-slate-700 rounded-full"></div>
-              <div className="absolute inset-0 border-4 border-cyan-500 rounded-full border-t-transparent animate-spin"></div>
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="relative w-32 h-32 mb-8">
+              <div className="absolute inset-0 border-8 border-[#2D1B4E] rounded-full"></div>
+              <div className="absolute inset-0 border-8 border-t-[#FF3AF2] border-r-[#00F5D4] border-b-[#FFE600] border-l-[#FF6B35] rounded-full animate-spin"></div>
             </div>
-            <h3 className="text-xl font-bold animate-pulse text-cyan-300">
-              {appState === AppState.ANALYZING 
-                ? (useAI ? 'Vision Model Analyzing...' : 'Scanning Black Lines & OCR...') 
-                : 'Generating Narration...'}
+            <h3 className="font-display text-6xl text-white text-shadow-neon animate-pulse">
+              {appState === AppState.ANALYZING ? 'ANALYZING...' : 'COOKING AUDIO...'}
             </h3>
-            <p className="text-slate-400 mt-2 text-sm text-center max-w-xs">
-              {appState === AppState.ANALYZING 
-                ? (useAI ? 'Detecting text panels and comedic timing.' : 'Running Tesseract.js locally.') 
-                : 'Preparing Editor...'}
+            <p className="text-[#00F5D4] font-mono mt-4 text-xl">
+               DO NOT RESIST THE PROCESS
             </p>
           </div>
         )}
 
         {/* State: EDITOR / PLAYER */}
         {(appState === AppState.READY || appState === AppState.PLAYING || appState === AppState.RECORDING) && imageSrc && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 w-full">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full">
             
-            {/* Left: Canvas */}
-            <div className="lg:col-span-2 flex flex-col items-center">
-              <VideoCanvas 
-                imageSrc={imageSrc} 
-                segments={segments} 
-                appState={appState} 
-                setAppState={setAppState} 
-                width={800}
-                height={600}
-                editingSegmentId={editingSegmentId}
-                onUpdateSegment={updateSegmentBox}
-                voice={getSelectedVoice()}
-              />
-              
-              {/* Controls */}
-              <div className="flex gap-4 mt-6">
+            {/* Left: Canvas (8 cols) */}
+            <div className="lg:col-span-8 flex flex-col items-center">
+              <div className="relative z-20 transform transition-transform duration-500 hover:scale-[1.01]">
+                 <VideoCanvas 
+                    imageSrc={imageSrc} 
+                    segments={segments} 
+                    appState={appState} 
+                    setAppState={setAppState} 
+                    width={800}
+                    height={600}
+                    editingSegmentId={editingSegmentId}
+                    onUpdateSegment={updateSegmentBox}
+                    voice={getSelectedVoice()}
+                  />
+              </div>
+
+              {/* Controls Bar */}
+              <div className="flex flex-wrap gap-4 mt-8 justify-center w-full">
                 <button
                   disabled={appState !== AppState.READY || editingSegmentId !== null}
                   onClick={() => setAppState(AppState.PLAYING)}
-                  className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold flex items-center gap-2 transition-colors"
+                  className="px-8 py-4 bg-gradient-to-r from-[#00F5D4] to-[#7B2FFF] border-4 border-white text-black font-black uppercase text-xl rounded-full shadow-stack-sm hover:shadow-stack-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
-                  </svg>
-                  Preview
+                  <span>▶</span> Preview
                 </button>
 
                 <button
                   disabled={appState !== AppState.READY || editingSegmentId !== null}
                   onClick={() => setAppState(AppState.RECORDING)}
-                  className="px-6 py-3 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-bold flex items-center gap-2 transition-colors shadow-lg shadow-red-900/20"
+                  className="px-8 py-4 bg-[#FF3AF2] border-4 border-[#FFE600] text-white font-black uppercase text-xl rounded-full shadow-hard-yellow hover:shadow-stack-lg hover:-translate-y-1 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 animate-pulse-glow"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
-                  </svg>
-                  Export Video
+                  <span>🔴</span> Export Video
                 </button>
 
                 <button 
                   onClick={handleReset}
-                  className="px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded-lg font-medium text-slate-300"
+                  className="px-6 py-4 bg-[#2D1B4E] border-4 border-[#FF6B35] text-[#FF6B35] font-bold uppercase rounded-full hover:bg-[#FF6B35] hover:text-black transition-colors"
                 >
                   Reset
                 </button>
               </div>
-              
-              {!useAI && (
-                 <p className="text-[10px] text-slate-500 mt-2 italic max-w-md text-center">
-                     Preview uses Local Browser Voices. Export attempts to fetch audio from a free service to ensure sound in the video file.
-                 </p>
-              )}
             </div>
 
-            {/* Right: Segment List */}
-            <div className="lg:col-span-1 bg-slate-900/50 rounded-xl p-4 border border-slate-800 h-fit max-h-[600px] overflow-y-auto flex flex-col">
-              <div className="flex justify-between items-center mb-4 sticky top-0 bg-slate-900/95 py-2 z-10 border-b border-slate-700">
-                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">
-                   Timeline
+            {/* Right: Segment List (4 cols) */}
+            <div className="lg:col-span-4 flex flex-col h-[700px]">
+              <div className="flex justify-between items-center mb-6 bg-[#2D1B4E] p-4 rounded-xl border-4 border-[#7B2FFF] shadow-hard-magenta">
+                <h3 className="font-display text-2xl text-white tracking-wide">
+                   TIMELINE
                 </h3>
                 <button 
                   onClick={addSegment}
                   disabled={isProcessingAction}
-                  className="px-2 py-1 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded font-bold disabled:opacity-50"
+                  className="px-4 py-2 bg-[#FFE600] border-2 border-black text-black font-black rounded hover:bg-white transition-colors text-sm uppercase"
                 >
-                  {isProcessingAction ? '...' : '+ Add Reveal'}
+                  {isProcessingAction ? '...' : '+ Add'}
                 </button>
               </div>
               
-              <div className="space-y-3 flex-1">
-                {segments.map((seg, idx) => (
-                  <div key={seg.id} className={`p-3 rounded border transition-colors ${editingSegmentId === seg.id ? 'bg-slate-800/80 border-cyan-500 ring-1 ring-cyan-500/50' : 'bg-slate-800 border-slate-700 hover:border-indigo-500/50'}`}>
-                    
-                    {/* Header: Order & Actions */}
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-mono text-slate-400">#{idx + 1}</span>
-                      
-                      <div className="flex gap-1">
-                         <button 
-                          onClick={() => deleteSegment(seg.id)}
-                          className="p-1 hover:bg-red-900/50 text-slate-500 hover:text-red-400 rounded mr-2"
-                          title="Delete"
-                        >
-                          ✕
-                        </button>
-                        <button 
-                          onClick={() => moveSegment(idx, 'up')} 
-                          disabled={idx === 0 || editingSegmentId !== null}
-                          className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white disabled:opacity-30"
-                        >
-                          ↑
-                        </button>
-                        <button 
-                          onClick={() => moveSegment(idx, 'down')} 
-                          disabled={idx === segments.length - 1 || editingSegmentId !== null}
-                          className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white disabled:opacity-30"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          onClick={() => setEditingSegmentId(editingSegmentId === seg.id ? null : seg.id)}
-                          className={`ml-2 px-2 py-0.5 text-xs font-bold rounded ${editingSegmentId === seg.id ? 'bg-cyan-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
-                        >
-                          {editingSegmentId === seg.id ? 'Done' : 'Edit'}
-                        </button>
+              <div className="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-hide pb-20">
+                {segments.map((seg, idx) => {
+                  const accent = ACCENT_COLORS[idx % ACCENT_COLORS.length];
+                  const nextAccent = ACCENT_COLORS[(idx + 1) % ACCENT_COLORS.length];
+                  
+                  return (
+                    <div 
+                      key={seg.id} 
+                      className={`relative p-5 rounded-3xl border-4 transition-all duration-300 ${editingSegmentId === seg.id ? 'scale-105 z-20' : 'hover:scale-102 hover:rotate-1'}`}
+                      style={{ 
+                        backgroundColor: '#2D1B4E', 
+                        borderColor: editingSegmentId === seg.id ? '#FFFFFF' : accent,
+                        boxShadow: editingSegmentId === seg.id ? `8px 8px 0px ${nextAccent}` : `6px 6px 0px ${nextAccent}`
+                      }}
+                    >
+                      {/* Header */}
+                      <div className="flex justify-between items-center mb-3 border-b-2 border-dashed border-white/20 pb-2">
+                        <span className="font-display text-2xl" style={{ color: accent }}>#{idx + 1}</span>
+                        <div className="flex gap-2">
+                           <button onClick={() => deleteSegment(seg.id)} className="text-white/50 hover:text-[#FF3AF2] font-bold">✕</button>
+                           <button onClick={() => moveSegment(idx, 'up')} disabled={idx === 0} className="text-white/50 hover:text-[#00F5D4]">↑</button>
+                           <button onClick={() => moveSegment(idx, 'down')} disabled={idx === segments.length - 1} className="text-white/50 hover:text-[#00F5D4]">↓</button>
+                        </div>
                       </div>
-                    </div>
 
-                    <p className="text-sm text-slate-200 line-clamp-2 mb-2 font-medium">{seg.text}</p>
-                    
-                    {/* Status Badges */}
-                    <div className="flex gap-2 mb-2 items-center">
-                      {seg.audioBase64 ? (
-                        <span className="text-[10px] bg-green-900/50 text-green-300 px-1.5 py-0.5 rounded">
-                           {seg.audioType === 'mp3' ? 'MP3 Ready' : 'Audio Ready'}
-                        </span>
+                      {/* Content */}
+                      {editingSegmentId === seg.id ? (
+                        <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2">
+                             <div className="bg-[#00F5D4]/20 p-2 rounded border-2 border-[#00F5D4] border-dashed text-center">
+                                <button onClick={() => scanTextForSegment(seg.id)} disabled={isProcessingAction} className="text-xs font-bold text-[#00F5D4] uppercase hover:text-white">
+                                    {isProcessingAction ? 'Scanning...' : '📍 Auto-Scan Box'}
+                                </button>
+                             </div>
+                             <div>
+                                <label className="text-xs font-bold text-white/60 uppercase">Text</label>
+                                <textarea 
+                                    value={seg.text} 
+                                    onChange={(e) => updateSegmentText(seg.id, e.target.value)}
+                                    className="w-full bg-black/40 border-2 border-white/20 rounded p-2 text-white font-mono text-sm focus:border-[#FFE600] outline-none"
+                                    rows={2}
+                                />
+                             </div>
+                             <div>
+                                <label className="text-xs font-bold text-white/60 uppercase">Seconds</label>
+                                <input 
+                                    type="number" step="0.5" 
+                                    value={seg.duration} 
+                                    onChange={(e) => updateSegmentDuration(seg.id, Number(e.target.value))}
+                                    className="w-full bg-black/40 border-2 border-white/20 rounded p-2 text-white font-mono text-sm focus:border-[#FFE600] outline-none"
+                                />
+                             </div>
+                             <button 
+                                onClick={() => setEditingSegmentId(null)}
+                                className="w-full py-2 bg-[#FFE600] text-black font-bold uppercase rounded hover:bg-white"
+                             >
+                                Done
+                             </button>
+                        </div>
                       ) : (
-                        seg.text ? (
-                            <span className="text-[10px] bg-indigo-900/50 text-indigo-300 px-1.5 py-0.5 rounded">Browser TTS</span>
-                        ) : (
-                            <span className="text-[10px] bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded">Silent</span>
-                        )
+                        <div onClick={() => setEditingSegmentId(seg.id)} className="cursor-pointer group">
+                             <p className="text-white font-bold text-lg leading-tight line-clamp-2 group-hover:text-[#FFE600] transition-colors">
+                                 {seg.text || <span className="italic text-white/40">Empty Scene</span>}
+                             </p>
+                             <div className="mt-3 flex gap-2">
+                                <span className="px-2 py-1 bg-black/40 rounded text-xs font-mono text-white/70 border border-white/10">
+                                    ⏱ {seg.duration}s
+                                </span>
+                                {seg.audioBase64 ? (
+                                    <span className="px-2 py-1 bg-[#00F5D4]/20 text-[#00F5D4] rounded text-xs font-bold border border-[#00F5D4]/50">
+                                        AUDIO READY
+                                    </span>
+                                ) : (
+                                    <span className="px-2 py-1 bg-[#FF3AF2]/20 text-[#FF3AF2] rounded text-xs font-bold border border-[#FF3AF2]/50">
+                                        BROWSER TTS
+                                    </span>
+                                )}
+                             </div>
+                        </div>
                       )}
-                      <span className="text-[10px] text-slate-500 font-mono">
-                         {seg.duration}s
-                      </span>
                     </div>
-
-                    {/* Editor Controls */}
-                    {editingSegmentId === seg.id && (
-                      <div className="mt-3 pt-3 border-t border-slate-700 space-y-3">
-                        <div className="bg-cyan-900/20 p-2 rounded border border-cyan-800/50">
-                            <p className="text-[10px] text-cyan-200 text-center mb-2">
-                                Drag box on image to resize
-                            </p>
-                            <button
-                              onClick={() => scanTextForSegment(seg.id)}
-                              disabled={isProcessingAction}
-                              className="w-full py-1 bg-cyan-700 hover:bg-cyan-600 text-[10px] rounded text-white font-bold disabled:opacity-50"
-                            >
-                                {isProcessingAction ? 'Scanning...' : '📍 Auto-Detect Text In Box'}
-                            </button>
-                        </div>
-                        
-                        <div>
-                            <label className="text-[10px] text-slate-500 block mb-1">Caption / Notes</label>
-                            <input 
-                                type="text"
-                                value={seg.text}
-                                onChange={(e) => updateSegmentText(seg.id, e.target.value)}
-                                className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="text-[10px] text-slate-500 block mb-1">Duration (seconds)</label>
-                            <input 
-                                type="number" step="0.5" min="0.5"
-                                value={seg.duration}
-                                onChange={(e) => updateSegmentDuration(seg.id, Number(e.target.value))}
-                                className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs text-white"
-                            />
-                        </div>
-                      </div>
-                    )}
-
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
