@@ -41,6 +41,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   // Playback state refs
   const currentSegmentIndexRef = useRef<number>(-1);
   const isPlayingRef = useRef<boolean>(false);
+  const animationFrameRef = useRef<number | null>(null);
   
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
   const [canvasDims, setCanvasDims] = useState<{ width: number, height: number }>({ width, height });
@@ -69,6 +70,9 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     if (imgRef.current) {
         drawFrame();
     }
+    return () => {
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    };
   }, [canvasDims, editingSegmentId, segments]);
 
   const getLayout = () => {
@@ -192,7 +196,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     });
 
     if (isPlayingRef.current) {
-        requestAnimationFrame(drawFrame);
+        animationFrameRef.current = requestAnimationFrame(drawFrame);
     }
   };
 
@@ -343,13 +347,14 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     const actx = audioContextRef.current;
     if (actx.state === 'suspended') await actx.resume();
 
-    // 1. SETUP RECORDING (Screen Share)
+    // 1. SETUP RECORDING
     if (isRecording && canvasRef.current) {
       try {
+        alert("Please select the current tab ('This Tab') and ensure 'Share tab audio' is CHECKED.");
+        
         // Request Display Media to capture system/tab audio
-        // NOTE: We cast to 'any' because some options like 'preferCurrentTab' are experimental in TS types
         const displayMedia = await navigator.mediaDevices.getDisplayMedia({
-            video: true, // Video is mandatory to get audio
+            video: true, // Required to get audio
             audio: true,
             preferCurrentTab: true,
             selfBrowserSurface: "include",
@@ -361,15 +366,17 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         // Verify audio track
         const audioTrack = displayMedia.getAudioTracks()[0];
         if (!audioTrack) {
-           alert("No audio track detected! Please ensure 'Share tab audio' is checked in the browser popup.");
+           alert("No audio track detected! You must check 'Share tab audio' in the browser dialog.");
            displayMedia.getTracks().forEach(t => t.stop());
            setAppState(AppState.READY);
            return;
         }
 
-        // Combine Canvas Video + System Audio
+        // Get Video from Canvas
         const canvasStream = canvasRef.current.captureStream(30);
         const videoTrack = canvasStream.getVideoTracks()[0];
+        
+        // Combine: Canvas Video + System Audio
         const combinedStream = new MediaStream([videoTrack, audioTrack]);
 
         // Init Recorder
@@ -399,18 +406,21 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         };
 
         mediaRecorderRef.current.start(100);
+        
+        // Add a small buffer start time
+        await new Promise(r => setTimeout(r, 500));
 
       } catch (e: any) {
           console.error("Recording setup failed or cancelled", e);
           if (e.name === 'NotAllowedError' || e.name === 'SecurityError' || (e.message && e.message.includes('policy'))) {
-              alert("Screen recording permission was denied or is blocked by the browser policy. Please ensure you grant permission to share the screen (and audio) when prompted.");
+              alert("Screen recording permission was denied. Please allow screen sharing to export video with audio.");
           }
           setAppState(AppState.READY);
           return;
       }
     }
 
-    // 2. PLAYBACK LOOP (Unified)
+    // 2. PLAYBACK LOOP
     isPlayingRef.current = true;
     currentSegmentIndexRef.current = -1;
     drawFrame();
@@ -423,8 +433,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
         let audioDuration = 0;
 
-        // If we have an audio blob (AI generated or fetched), we play it via Web Audio API.
-        // This output goes to speakers, so getDisplayMedia captures it.
+        // Play Audio (Speaker Output)
         if (seg.audioBase64) {
             try {
               let buffer: AudioBuffer;
@@ -442,47 +451,49 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
               console.error("Audio playback error", err);
             }
         } 
-        // If text only (Manual Mode), we use Browser TTS.
-        // This output goes to speakers, so getDisplayMedia captures it.
         else if (seg.text) {
              await new Promise<void>((resolve) => {
                  if (!isPlayingRef.current) { resolve(); return; }
                  const u = new SpeechSynthesisUtterance(seg.text);
                  if (voice) u.voice = voice;
-                 u.onend = () => resolve();
-                 u.onerror = () => resolve();
-                 // Estimate duration if synthesis fails instantly to prevent skipping
-                 audioDuration = 0; // Duration logic handled by onend
+                 
+                 // Fallback timeout in case onend never fires
+                 const timeoutId = setTimeout(() => resolve(), (Math.max(1, seg.text.length * 0.1) * 1000) + 2000);
+                 
+                 u.onend = () => { clearTimeout(timeoutId); resolve(); };
+                 u.onerror = () => { clearTimeout(timeoutId); resolve(); };
                  window.speechSynthesis.speak(u);
              });
         }
         
-        // If audioDuration was set (from buffer), wait for it.
-        // If we used TTS, the await Promise above handles the wait.
+        // Wait logic
         if (audioDuration > 0) {
             await new Promise(r => setTimeout(r, audioDuration * 1000));
         } else if (!seg.text && !seg.audioBase64) {
-             // Visual only, use segment duration
              await new Promise(r => setTimeout(r, (seg.duration || 1) * 1000));
         }
 
-        // Small buffer between segments
+        // Gap between segments
         await new Promise(r => setTimeout(r, 300));
     }
 
-    // 3. CLEANUP
+    // 3. CLEANUP & STOP
+    // Add end padding so the video doesn't cut off abruptly
+    if (isRecording) {
+        await new Promise(r => setTimeout(r, 1000));
+    }
+
+    isPlayingRef.current = false;
+    currentSegmentIndexRef.current = -1;
+    setActiveSegmentId(null);
+    drawFrame(); // Final frame draw (cleared)
+
     if (isRecording) {
         mediaRecorderRef.current?.stop();
-        // Stop the screen share streams to remove the browser warning bar
         screenStreamRef.current?.getTracks().forEach(t => t.stop());
     } else {
         setAppState(AppState.READY);
     }
-    
-    isPlayingRef.current = false;
-    currentSegmentIndexRef.current = -1;
-    setActiveSegmentId(null);
-    drawFrame();
   };
 
   useEffect(() => {
@@ -490,6 +501,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     else if (appState === AppState.RECORDING) playSequence(true);
     else {
         isPlayingRef.current = false;
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
         window.speechSynthesis.cancel();
     }
   }, [appState]);
