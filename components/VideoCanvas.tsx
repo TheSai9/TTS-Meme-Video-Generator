@@ -29,6 +29,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   
   // State Refs
@@ -37,7 +38,7 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   // Recording refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
-  const screenStreamRef = useRef<MediaStream | null>(null); // To stop screen share after recording
+  const silentOscillatorRef = useRef<OscillatorNode | null>(null);
 
   // Playback state refs
   const currentSegmentIndexRef = useRef<number>(-1);
@@ -351,34 +352,27 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     // 1. SETUP RECORDING
     if (isRecording && canvasRef.current) {
       try {
-        alert("Select 'This Tab' and check 'Share tab audio' for best results.");
-        
-        // Request Display Media
-        const displayMedia = await navigator.mediaDevices.getDisplayMedia({
-            video: true, 
-            audio: true,
-            preferCurrentTab: true,
-            selfBrowserSurface: "include",
-            systemAudio: "include"
-        } as any);
+        // Setup Internal Audio Capture (No prompt needed)
+        const dest = actx.createMediaStreamDestination();
+        audioDestinationRef.current = dest;
 
-        screenStreamRef.current = displayMedia;
-
-        // Verify audio track
-        const audioTrack = displayMedia.getAudioTracks()[0];
-        if (!audioTrack) {
-           alert("No audio track detected! Audio might be missing.");
-           // We continue even if missing, as visual export is still valuable.
-        }
+        // --- CRITICAL FIX: Add Silent Oscillator to keep Audio Clock ticking ---
+        // MediaRecorder with MediaStreamDestination often fails (0kb file) if the stream is empty/silent initially.
+        const silentOsc = actx.createOscillator();
+        const silentGain = actx.createGain();
+        silentGain.gain.value = 0; // Pure silence
+        silentOsc.connect(silentGain);
+        silentGain.connect(dest);
+        silentOsc.start();
+        silentOscillatorRef.current = silentOsc;
 
         // Get Video from Canvas
-        const canvasStream = canvasRef.current.captureStream(60); // 60 FPS for smoothness
+        const canvasStream = canvasRef.current.captureStream(60); // 60 FPS
         const videoTrack = canvasStream.getVideoTracks()[0];
         
-        // Combine
-        const tracks = [videoTrack];
-        if (audioTrack) tracks.push(audioTrack);
-        const combinedStream = new MediaStream(tracks);
+        // Combine with Audio Stream from internal destination
+        const audioTracks = dest.stream.getAudioTracks();
+        const combinedStream = new MediaStream([videoTrack, ...audioTracks]);
 
         // Init Recorder
         const mimeTypes = [
@@ -398,6 +392,12 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
         
         mediaRecorderRef.current.onstop = () => {
             const blob = new Blob(recordedChunksRef.current, { type: mimeType });
+            if (blob.size === 0) {
+                console.error("Recording failed: 0 bytes");
+                alert("Recording produced an empty file. Please try again.");
+                setAppState(AppState.READY);
+                return;
+            }
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -406,104 +406,94 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
             setAppState(AppState.READY);
         };
 
+        // Ensure canvas is drawing BEFORE we start recording to capture first frame
+        isPlayingRef.current = true;
+        currentSegmentIndexRef.current = -1;
+        drawFrame();
+
         // Start recording
         mediaRecorderRef.current.start(100);
         
-        // Add a buffer start time for the recorder to initialize
+        // Buffer start (allow recorder to initialize with data flowing)
         await new Promise(r => setTimeout(r, 800));
 
       } catch (e: any) {
-          console.error("Recording setup failed or cancelled", e);
+          console.error("Recording setup failed", e);
           setAppState(AppState.READY);
           return;
       }
+    } else {
+        // Just Playback mode
+        isPlayingRef.current = true;
+        currentSegmentIndexRef.current = -1;
+        drawFrame();
     }
 
     // 2. PLAYBACK LOOP
-    isPlayingRef.current = true;
-    currentSegmentIndexRef.current = -1;
-    drawFrame();
-
     for (let i = 0; i < segments.length; i++) {
         if (!isPlayingRef.current) break;
         const seg = segments[i];
         currentSegmentIndexRef.current = i;
         setActiveSegmentId(seg.id);
 
-        let waitDuration = seg.duration || 2;
-        let audioPlayed = false;
+        let waitDuration = seg.duration || 2.0;
 
-        // A) Existing Audio (AI generated or already cached)
+        // Try to obtain audio buffer
+        let audioBuffer: AudioBuffer | null = null;
+        
+        // If we already have audio, use it
         if (seg.audioBase64) {
             try {
-              let buffer: AudioBuffer;
-              if (seg.audioType === 'mp3') {
-                 buffer = await decodeAudio(seg.audioBase64, actx);
-              } else {
-                 buffer = decodePCM(seg.audioBase64, actx);
-              }
-              const source = actx.createBufferSource();
-              source.buffer = buffer;
-              source.connect(actx.destination);
-              source.start(0);
-              waitDuration = buffer.duration;
-              audioPlayed = true;
-            } catch (err) {
-              console.error("Audio playback error", err);
-            }
-        } 
-        // B) Text available - Manual Mode or AI failed
-        else if (seg.text) {
-             // If recording, try to fetch high-quality TTS first to ensure audio is captured via System Audio
-             if (isRecording) {
-                 try {
-                     const ttsBase64 = await fetchFreeTTS(seg.text);
-                     if (ttsBase64) {
-                         const buffer = await decodeAudio(ttsBase64, actx);
-                         const source = actx.createBufferSource();
-                         source.buffer = buffer;
-                         source.connect(actx.destination);
-                         source.start(0);
-                         waitDuration = buffer.duration;
-                         audioPlayed = true;
-                         // Cache it for next time
-                         seg.audioBase64 = ttsBase64;
-                         seg.audioType = 'mp3';
-                     }
-                 } catch (e) {
-                     console.warn("Remote TTS failed, fallback to browser", e);
-                 }
-             }
-
-             // Fallback to Browser SpeechSynthesis if remote failed or we are just previewing
-             if (!audioPlayed) {
-                 await new Promise<void>((resolve) => {
-                     if (!isPlayingRef.current) { resolve(); return; }
-                     const u = new SpeechSynthesisUtterance(seg.text);
-                     if (voice) u.voice = voice;
-                     
-                     // Browser TTS is unpredictable during recording, so we use the promise to wait, 
-                     // but we set waitDuration to 0 after this finishes because we already waited.
-                     
-                     // Fallback timeout
-                     const timeoutId = setTimeout(() => resolve(), (Math.max(1, seg.text.length * 0.1) * 1000) + 3000);
-                     
-                     u.onend = () => { clearTimeout(timeoutId); resolve(); };
-                     u.onerror = () => { clearTimeout(timeoutId); resolve(); };
-                     
-                     window.speechSynthesis.speak(u);
-                 });
-                 // We already waited for the speech to finish
-                 waitDuration = 0; 
-             }
+                if (seg.audioType === 'mp3') {
+                    audioBuffer = await decodeAudio(seg.audioBase64, actx);
+                } else {
+                    audioBuffer = decodePCM(seg.audioBase64, actx);
+                }
+            } catch (err) { console.error("Cached audio decode error", err); }
         }
         
-        // Final Wait (either for audio duration, or visual duration if no audio)
+        // If no audio yet, and recording, try to fetch it now (Force MP3)
+        // Browser TTS cannot be captured by MediaStreamDestination easily, so we fallback to Fetch
+        if (!audioBuffer && isRecording && seg.text) {
+             try {
+                 const ttsBase64 = await fetchFreeTTS(seg.text);
+                 if (ttsBase64) {
+                     audioBuffer = await decodeAudio(ttsBase64, actx);
+                     // Cache for future
+                     seg.audioBase64 = ttsBase64;
+                     seg.audioType = 'mp3';
+                 }
+             } catch (e) {
+                 console.warn("TTS fetch failed during record", e);
+             }
+        }
+
+        // If we have a buffer, play it
+        if (audioBuffer) {
+             const source = actx.createBufferSource();
+             source.buffer = audioBuffer;
+             
+             // Connect to Destination (for Recording) AND Speakers (for Monitoring)
+             if (isRecording && audioDestinationRef.current) {
+                 source.connect(audioDestinationRef.current);
+             }
+             source.connect(actx.destination);
+             
+             source.start(0);
+             waitDuration = audioBuffer.duration;
+        } else if (!isRecording && seg.text) {
+             // Preview Mode Only: Use Browser TTS if visual preview
+             const u = new SpeechSynthesisUtterance(seg.text);
+             if (voice) u.voice = voice;
+             window.speechSynthesis.speak(u);
+        }
+
+        // WAIT Logic - Decoupled from audio success
         if (waitDuration > 0) {
             await new Promise(r => setTimeout(r, waitDuration * 1000));
         }
 
-        // Gap between segments
+        // Gap
         await new Promise(r => setTimeout(r, 400));
     }
 
@@ -511,8 +501,16 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     if (isRecording) {
         // End buffer
         await new Promise(r => setTimeout(r, 1000));
-        mediaRecorderRef.current?.stop();
-        screenStreamRef.current?.getTracks().forEach(t => t.stop());
+        
+        if (silentOscillatorRef.current) {
+            silentOscillatorRef.current.stop();
+            silentOscillatorRef.current.disconnect();
+            silentOscillatorRef.current = null;
+        }
+
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+            mediaRecorderRef.current.stop();
+        }
     } else {
         setAppState(AppState.READY);
     }
