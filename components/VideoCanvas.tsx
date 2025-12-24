@@ -1,6 +1,5 @@
 import React, { useRef, useEffect, useState, MouseEvent } from 'react';
 import { MemeSegment, AppState, BoundingBox } from '../types';
-import { fetchFreeTTS } from '../services/localAnalysisService';
 
 interface VideoCanvasProps {
   imageSrc: string;
@@ -36,9 +35,8 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
   
   // Recording refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const destinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
-  const silenceOscillatorRef = useRef<OscillatorNode | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null); // To stop screen share after recording
 
   // Playback state refs
   const currentSegmentIndexRef = useRef<number>(-1);
@@ -68,8 +66,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
   // Redraw when dimensions change (implies image loaded) or segments update
   useEffect(() => {
-    // We rely on canvasDims causing a re-render of the canvas element, 
-    // then this effect runs to draw the frame on the resized canvas.
     if (imgRef.current) {
         drawFrame();
     }
@@ -80,8 +76,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
     const img = imgRef.current;
     if (!canvas || !img) return null;
 
-    // Since we set canvas size to image size, scale is 1 and offsets are 0.
-    // Kept logic generic just in case, but usually scale=1.
     const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
     const x = (canvas.width / 2) - (img.width / 2) * scale;
     const y = (canvas.height / 2) - (img.height / 2) * scale;
@@ -347,43 +341,53 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
       audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
     }
     const actx = audioContextRef.current;
-    
     if (actx.state === 'suspended') await actx.resume();
 
-    // Setup Recording
+    // 1. SETUP RECORDING (Screen Share)
     if (isRecording && canvasRef.current) {
-      const mimeTypes = [
-          "video/webm;codecs=vp9,opus",
-          "video/webm;codecs=vp8,opus",
-          "video/webm",
-          "video/mp4"
-      ];
-      const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || "video/webm";
-
-      destinationRef.current = actx.createMediaStreamDestination();
-      
-      // CRITICAL: Add a silent oscillator to "prime" the audio track.
-      // This ensures that even if no TTS plays, the track exists and has time data,
-      // preventing "broken" video files in players that expect consistent track data.
-      silenceOscillatorRef.current = actx.createOscillator();
-      const silentGain = actx.createGain();
-      silentGain.gain.value = 0; // Absolute silence
-      silenceOscillatorRef.current.connect(silentGain);
-      silentGain.connect(destinationRef.current);
-      silenceOscillatorRef.current.start();
-
-      const canvasStream = canvasRef.current.captureStream(30);
-      const combinedStream = new MediaStream([
-        ...canvasStream.getVideoTracks(),
-        ...destinationRef.current.stream.getAudioTracks()
-      ]);
-      
       try {
+        // Request Display Media to capture system/tab audio
+        // NOTE: We cast to 'any' because some options like 'preferCurrentTab' are experimental in TS types
+        const displayMedia = await navigator.mediaDevices.getDisplayMedia({
+            video: true, // Video is mandatory to get audio
+            audio: true,
+            preferCurrentTab: true,
+            selfBrowserSurface: "include",
+            systemAudio: "include"
+        } as any);
+
+        screenStreamRef.current = displayMedia;
+
+        // Verify audio track
+        const audioTrack = displayMedia.getAudioTracks()[0];
+        if (!audioTrack) {
+           alert("No audio track detected! Please ensure 'Share tab audio' is checked in the browser popup.");
+           displayMedia.getTracks().forEach(t => t.stop());
+           setAppState(AppState.READY);
+           return;
+        }
+
+        // Combine Canvas Video + System Audio
+        const canvasStream = canvasRef.current.captureStream(30);
+        const videoTrack = canvasStream.getVideoTracks()[0];
+        const combinedStream = new MediaStream([videoTrack, audioTrack]);
+
+        // Init Recorder
+        const mimeTypes = [
+            "video/webm;codecs=vp9,opus",
+            "video/webm;codecs=vp8,opus",
+            "video/webm",
+            "video/mp4"
+        ];
+        const mimeType = mimeTypes.find(type => MediaRecorder.isTypeSupported(type)) || "video/webm";
+
         mediaRecorderRef.current = new MediaRecorder(combinedStream, { mimeType });
         recordedChunksRef.current = [];
+        
         mediaRecorderRef.current.ondataavailable = (e) => { 
             if (e.data.size > 0) recordedChunksRef.current.push(e.data); 
         };
+        
         mediaRecorderRef.current.onstop = () => {
             const blob = new Blob(recordedChunksRef.current, { type: mimeType });
             const url = URL.createObjectURL(blob);
@@ -393,16 +397,17 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
             a.click();
             setAppState(AppState.READY);
         };
-        // Request data chunks every 100ms. This prevents the "single chunk" issue 
-        // that often leads to corrupt headers or unseekable files.
-        mediaRecorderRef.current.start(100); 
+
+        mediaRecorderRef.current.start(100);
+
       } catch (e) {
-          console.error("MediaRecorder failed to start", e);
+          console.error("Recording setup failed or cancelled", e);
           setAppState(AppState.READY);
           return;
       }
     }
 
+    // 2. PLAYBACK LOOP (Unified)
     isPlayingRef.current = true;
     currentSegmentIndexRef.current = -1;
     drawFrame();
@@ -415,8 +420,9 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
         let audioDuration = 0;
 
+        // If we have an audio blob (AI generated or fetched), we play it via Web Audio API.
+        // This output goes to speakers, so getDisplayMedia captures it.
         if (seg.audioBase64) {
-            // CASE 1: Pre-existing Audio Blob
             try {
               let buffer: AudioBuffer;
               if (seg.audioType === 'mp3') {
@@ -427,72 +433,45 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
               audioDuration = buffer.duration;
               const source = actx.createBufferSource();
               source.buffer = buffer;
-              const mainOutput = actx.createGain();
-              mainOutput.connect(actx.destination);
-              if (isRecording && destinationRef.current) mainOutput.connect(destinationRef.current);
-              source.connect(mainOutput);
+              source.connect(actx.destination); // Play to speakers
               source.start(0);
             } catch (err) {
               console.error("Audio playback error", err);
             }
-        } else if (seg.text) {
-             // CASE 2: No Blob - Manual Mode
-             if (isRecording) {
-                 // RECORDING: Try to fetch audio just-in-time
-                 try {
-                     const fetchedAudio = await fetchFreeTTS(seg.text);
-                     if (fetchedAudio) {
-                         const buffer = await decodeAudio(fetchedAudio, actx);
-                         audioDuration = buffer.duration;
-                         const source = actx.createBufferSource();
-                         source.buffer = buffer;
-                         const mainOutput = actx.createGain();
-                         mainOutput.connect(actx.destination);
-                         if (destinationRef.current) mainOutput.connect(destinationRef.current);
-                         source.connect(mainOutput);
-                         source.start(0);
-                     }
-                 } catch (e) {
-                     console.warn("JIT Audio fetch failed for export", e);
-                 }
-             } else {
-                 // PREVIEW: Use Browser TTS (SpeechSynthesis)
-                 // This cannot be recorded, so audioDuration remains 0 (wait loop handles sync)
-                 await new Promise<void>((resolve) => {
-                     if (!isPlayingRef.current) { resolve(); return; }
-                     const u = new SpeechSynthesisUtterance(seg.text);
-                     if (voice) u.voice = voice;
-                     u.onend = () => resolve();
-                     u.onerror = () => resolve();
-                     window.speechSynthesis.speak(u);
-                 });
-             }
+        } 
+        // If text only (Manual Mode), we use Browser TTS.
+        // This output goes to speakers, so getDisplayMedia captures it.
+        else if (seg.text) {
+             await new Promise<void>((resolve) => {
+                 if (!isPlayingRef.current) { resolve(); return; }
+                 const u = new SpeechSynthesisUtterance(seg.text);
+                 if (voice) u.voice = voice;
+                 u.onend = () => resolve();
+                 u.onerror = () => resolve();
+                 // Estimate duration if synthesis fails instantly to prevent skipping
+                 audioDuration = 0; // Duration logic handled by onend
+                 window.speechSynthesis.speak(u);
+             });
         }
         
-        // Wait logic
-        const waitTime = Math.max(audioDuration, seg.duration || 0) * 1000;
+        // If audioDuration was set (from buffer), wait for it.
+        // If we used TTS, the await Promise above handles the wait.
         if (audioDuration > 0) {
-            // If we played an audio buffer, wait for it
-            await new Promise(r => setTimeout(r, waitTime));
-        } else {
-            // Fallback wait if JIT fetch failed or using Browser TTS
-            // In manual recording mode, this produces silence (which is fine now that we have the silent oscillator)
-            if (!isRecording) await new Promise(r => setTimeout(r, 500)); 
-            else await new Promise(r => setTimeout(r, waitTime));
+            await new Promise(r => setTimeout(r, audioDuration * 1000));
+        } else if (!seg.text && !seg.audioBase64) {
+             // Visual only, use segment duration
+             await new Promise(r => setTimeout(r, (seg.duration || 1) * 1000));
         }
-        
-        await new Promise(r => setTimeout(r, 200));
+
+        // Small buffer between segments
+        await new Promise(r => setTimeout(r, 300));
     }
 
-    if (isRecording && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-        // Clean up silence
-        if (silenceOscillatorRef.current) {
-            silenceOscillatorRef.current.stop();
-            silenceOscillatorRef.current.disconnect();
-            silenceOscillatorRef.current = null;
-        }
-        await new Promise(r => setTimeout(r, 500));
-        mediaRecorderRef.current.stop();
+    // 3. CLEANUP
+    if (isRecording) {
+        mediaRecorderRef.current?.stop();
+        // Stop the screen share streams to remove the browser warning bar
+        screenStreamRef.current?.getTracks().forEach(t => t.stop());
     } else {
         setAppState(AppState.READY);
     }
@@ -514,7 +493,6 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
   return (
     <div className="flex flex-col items-center gap-6 w-full">
-      {/* Taped Photo Container - Removed blurry tape UI */}
       <div className="relative p-2 bg-white border-[3px] border-[#2d2d2d] border-wobbly-sm shadow-sketch-lg rotate-1 transition-transform duration-500 hover:rotate-0 w-full flex justify-center">
         <canvas 
           ref={canvasRef} 
