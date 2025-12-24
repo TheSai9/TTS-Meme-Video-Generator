@@ -400,8 +400,11 @@ const VideoCanvas: React.FC<VideoCanvasProps> = ({
 
         mediaRecorderRef.current.start(100);
 
-      } catch (e) {
+      } catch (e: any) {
           console.error("Recording setup failed or cancelled", e);
+          if (e.name === 'NotAllowedError' || e.name === 'SecurityError' || (e.message && e.message.includes('policy'))) {
+              alert("Screen recording permission was denied or is blocked by the browser policy. Please ensure you grant permission to share the screen (and audio) when prompted.");
+          }
           setAppState(AppState.READY);
           return;
       }
